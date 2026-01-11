@@ -20,7 +20,6 @@ let privateRooms = new Map(); // Store active private sessions
 let communityTimerEnd = Date.now() + 30 * 60 * 1000;
 let siteTimerEnd = Date.now() + 120 * 60 * 1000;
 
-// Reset community every 30 minutes
 const resetCommunity = () => {
   communityMessages = [];
   communityTimerEnd = Date.now() + 30 * 60 * 1000;
@@ -28,7 +27,6 @@ const resetCommunity = () => {
   console.log('Community reset triggered');
 };
 
-// Reset site every 2 hours
 const resetSite = () => {
   users.clear();
   communityMessages = [];
@@ -42,7 +40,6 @@ const resetSite = () => {
 setInterval(resetCommunity, 30 * 60 * 1000);
 setInterval(resetSite, 120 * 60 * 1000);
 
-// Cleanup expired community messages (older than 5 mins) and expired private rooms
 setInterval(() => {
   const now = Date.now();
   communityMessages = communityMessages.filter(m => now - m.timestamp < 300000);
@@ -50,10 +47,11 @@ setInterval(() => {
   for (let [id, room] of privateRooms.entries()) {
     if (now > room.expiresAt) {
       privateRooms.delete(id);
+      io.emit('CHAT_CLOSED', { roomId: id, reason: 'expired' });
       console.log(`Private room ${id} expired.`);
     }
   }
-}, 60000);
+}, 5000);
 
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
@@ -83,20 +81,36 @@ io.on('connection', (socket) => {
   });
 
   socket.on('CHAT_REQUEST', (data) => {
-    console.log(`Chat request from ${data.request.fromName} to ${data.request.toId}`);
-    // Broadcast to everyone; clients filter based on toId
     socket.broadcast.emit('CHAT_REQUEST', data);
   });
 
   socket.on('CHAT_ACCEPT', (data) => {
-    console.log(`Chat accepted for room ${data.room.id}`);
     privateRooms.set(data.room.id, data.room);
     io.emit('CHAT_ACCEPT', data);
   });
 
+  socket.on('CHAT_EXIT', (data) => {
+    // data: { roomId }
+    if (privateRooms.has(data.roomId)) {
+      privateRooms.delete(data.roomId);
+      io.emit('CHAT_CLOSED', { roomId: data.roomId, reason: 'exit' });
+      console.log(`Private room ${data.roomId} closed by user.`);
+    }
+  });
+
+  socket.on('CHAT_EXTEND', (data) => {
+    // data: { roomId }
+    const room = privateRooms.get(data.roomId);
+    if (room && !room.extended) {
+      room.extended = true;
+      room.expiresAt = Date.now() + 30 * 60 * 1000; // Reset to 30 more mins
+      privateRooms.set(room.id, room);
+      io.emit('CHAT_EXTENDED', { room });
+      console.log(`Private room ${room.id} extended.`);
+    }
+  });
+
   socket.on('CHAT_REJOIN', (data) => {
-    // data: { reconnectCode }
-    console.log(`User rejoining with code: ${data.reconnectCode}`);
     let found = false;
     for (let room of privateRooms.values()) {
       if (room.reconnectCode === data.reconnectCode) {

@@ -22,6 +22,7 @@ export interface PrivateRoom {
   reconnectCode: string;
   createdAt: number;
   expiresAt: number;
+  extended?: boolean; // Track if the 30min extension has been used
 }
 
 export interface ChatRequest {

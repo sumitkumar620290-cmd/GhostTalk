@@ -27,12 +27,8 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
 
   useEffect(() => {
     const filterMessages = () => {
-      if (!isCommunity) {
-        setVisibleMessages(messages);
-        return;
-      }
       const currentTime = Date.now();
-      const filtered = messages.filter(m => currentTime - m.timestamp < 301000);
+      const filtered = messages.filter(m => currentTime - m.timestamp < 300000);
       
       setVisibleMessages(prev => {
         if (prev.length === filtered.length && 
@@ -46,7 +42,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
     filterMessages();
     const interval = setInterval(filterMessages, 1000);
     return () => clearInterval(interval);
-  }, [messages, isCommunity]);
+  }, [messages]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     if (scrollRef.current) {
@@ -105,10 +101,10 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
         .message-disperse { animation: disperse 1s cubic-bezier(0.4, 0, 0.2, 1) forwards; pointer-events: none; }
       `}</style>
       
-      <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-end pb-32 md:pb-48 opacity-[0.03] select-none z-0">
-        <h2 className="text-[12vw] font-black uppercase tracking-tighter leading-none mb-4">Ghost Talk</h2>
-        <div className="text-center space-y-2">
-          <p className="text-xl md:text-2xl font-black uppercase tracking-[0.5em]">Messages delete after 5m</p>
+      <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-end pb-32 md:pb-48 opacity-[0.04] select-none z-0">
+        <h2 className="text-[14vw] font-black uppercase tracking-tighter leading-none">GhostTalk</h2>
+        <div className="text-center mt-4">
+          <p className="text-lg md:text-xl font-medium tracking-widest text-white uppercase italic">No identity • No memory • Voices fade</p>
         </div>
       </div>
 
@@ -118,11 +114,11 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
         className="flex-1 overflow-y-auto px-4 md:px-12 pt-52 pb-6 md:pt-52 md:pb-10 space-y-6 md:space-y-8 custom-scrollbar z-10 overscroll-contain touch-pan-y"
       >
         {visibleMessages.length === 0 && (
-          <div className="h-full flex flex-col items-center justify-start pt-20 md:pt-32 space-y-6 opacity-30 select-none text-center">
-            <div className="w-20 h-20 bg-slate-800/50 rounded-[1.5rem] flex items-center justify-center text-4xl shadow-inner">🌌</div>
-            <div className="space-y-1">
-              <p className="text-lg font-black uppercase tracking-[0.3em] text-white">SILENT SPACE</p>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Voices fade fast. Be the first.</p>
+          <div className="h-full flex flex-col items-center justify-start pt-20 md:pt-32 space-y-6 opacity-40 select-none text-center">
+            <div className="w-24 h-24 bg-slate-900 rounded-[2rem] flex items-center justify-center text-5xl shadow-2xl border border-white/5">👻</div>
+            <div className="space-y-2">
+              <p className="text-xl font-black uppercase tracking-[0.4em] text-white">Ghost Space</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 max-w-[200px] leading-relaxed mx-auto">Temporary conversations. No identity. No memory.</p>
             </div>
           </div>
         )}
@@ -132,7 +128,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
           const prevMsg = visibleMessages[idx - 1];
           const isCompact = prevMsg && prevMsg.senderId === msg.senderId && (msg.timestamp - prevMsg.timestamp < 60000);
           const age = now - msg.timestamp;
-          const isExpiring = isCommunity && age >= 300000;
+          const isExpiring = age >= 299000;
 
           return (
             <div 
@@ -142,8 +138,8 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
               {!isCompact && (
                 <div className={`flex items-center space-x-2 mb-2 px-1 ${isOwn ? 'flex-row-reverse space-x-reverse' : ''}`}>
                   <button 
-                    onClick={() => isCommunity && !isOwn && onUserClick?.(msg.senderId, msg.senderName)}
-                    className={`text-[9px] font-black uppercase tracking-widest ${isCommunity && !isOwn ? 'text-blue-400 underline decoration-blue-500/20' : 'text-slate-600'}`}
+                    onClick={() => !isOwn && onUserClick?.(msg.senderId, msg.senderName)}
+                    className={`text-[9px] font-black uppercase tracking-widest ${!isOwn ? 'text-blue-400 underline decoration-blue-500/20' : 'text-slate-600'}`}
                   >{msg.senderName}</button>
                   <span className="text-[8px] font-bold text-slate-800">{formatTime(msg.timestamp)}</span>
                 </div>
@@ -157,18 +153,18 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
         })}
       </div>
 
-      <div className="p-3 md:p-5 bg-slate-900/90 backdrop-blur-3xl border-t border-white/5 z-20 shrink-0">
+      <div className="p-3 md:p-5 bg-slate-900/95 backdrop-blur-3xl border-t border-white/5 z-20 shrink-0">
         <form onSubmit={handleSubmit} className="max-w-4xl mx-auto flex items-center space-x-3">
           <textarea
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
-            placeholder="Whisper something..."
+            placeholder="Type a disappearing message..."
             rows={1}
             className="flex-1 bg-slate-950 border border-white/5 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500/50 text-slate-100 placeholder-slate-700 resize-none"
             style={{ maxHeight: '120px' }}
           />
-          <button type="submit" disabled={!inputText.trim()} className="bg-blue-600 w-11 h-11 rounded-full flex items-center justify-center shrink-0 disabled:opacity-20 active:scale-90 transition-transform">
+          <button type="submit" disabled={!inputText.trim()} className="bg-blue-600 w-11 h-11 rounded-full flex items-center justify-center shrink-0 disabled:opacity-20 active:scale-90 transition-transform shadow-lg shadow-blue-900/20">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
           </button>
         </form>
