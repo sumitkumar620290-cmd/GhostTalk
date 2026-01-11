@@ -85,12 +85,12 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
         .message-disperse { animation: disperse 1s cubic-bezier(0.4, 0, 0.2, 1) forwards; pointer-events: none; }
       `}</style>
       
-      {/* WATERMARK BRANDING */}
-      <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center opacity-[0.03] select-none z-0">
-        <h2 className="text-3xl md:text-4xl font-black uppercase tracking-tighter leading-none">Ghost Talk</h2>
+      {/* WATERMARK BRANDING - Brightness increased for better visibility */}
+      <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center opacity-[0.12] select-none z-0">
+        <h2 className="text-3xl md:text-4xl font-black uppercase tracking-tighter leading-none text-slate-100">Ghost Talk</h2>
         <div className="flex flex-col items-center mt-2 text-center">
-          <p className="text-[9px] md:text-[10px] font-bold uppercase tracking-[0.4em] opacity-60">Chats fade after five minutes</p>
-          <p className="text-[9px] md:text-[10px] font-bold uppercase tracking-[0.4em] mt-1 opacity-60">global resets after every 30 minutes</p>
+          <p className="text-[9px] md:text-[10px] font-bold uppercase tracking-[0.4em] text-slate-300">Chats fade after five minutes</p>
+          <p className="text-[9px] md:text-[10px] font-bold uppercase tracking-[0.4em] mt-1 text-slate-300">global resets after every 30 minutes</p>
         </div>
       </div>
 

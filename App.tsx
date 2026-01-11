@@ -304,7 +304,9 @@ const App: React.FC = () => {
   const activeRoomTimeLeft = activePrivateRoom ? Math.max(0, activePrivateRoom.expiresAt - currentTime) : 0;
   const isFinalFive = activePrivateRoom && activePrivateRoom.extended && activeRoomTimeLeft <= 300000;
 
-  const SidebarContent = () => (
+  // Inlining the sidebar content directly into the main render ensures 
+  // the DOM nodes are stable and scroll position is not reset every second.
+  const renderSidebarInner = () => (
     <div className="flex flex-col h-full w-full overflow-hidden">
       <div className="shrink-0 mb-6">
         <div className="w-10 h-10 bg-blue-600/10 rounded-xl flex items-center justify-center mb-3 border border-blue-600/20 shadow-xl">
@@ -375,8 +377,9 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-[100dvh] w-screen overflow-hidden bg-slate-950 text-slate-100 selection:bg-blue-500/30">
+      {/* Desktop Sidebar */}
       <aside className="hidden md:flex flex-col w-64 bg-slate-900 border-r border-white/5 shrink-0 p-6 h-full overflow-hidden">
-        <SidebarContent />
+        {renderSidebarInner()}
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
@@ -480,7 +483,7 @@ const App: React.FC = () => {
           </div>
 
           <aside className={`fixed inset-y-0 left-0 z-[450] w-64 bg-slate-900 border-r border-white/5 transform transition-transform duration-300 ${showSidebar ? 'translate-x-0 shadow-2xl' : '-translate-x-full'} md:hidden`}>
-            <div className="h-full p-5 overflow-hidden"><SidebarContent /></div>
+            <div className="h-full p-5 overflow-hidden">{renderSidebarInner()}</div>
           </aside>
           {showSidebar && <div className="fixed inset-0 bg-black/60 z-[440] md:hidden" onClick={() => setShowSidebar(false)} />}
         </main>
