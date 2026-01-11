@@ -25,8 +25,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
     return () => clearInterval(ticker);
   }, []);
 
-  // Filter messages to show only those sent within the last 5 minutes (300,000 ms)
-  // Calculated in render body for absolute reliability and instant updates
+  // Filter messages to show only those sent within the last 5 minutes
   const visibleMessages = messages.filter(m => now - m.timestamp < 300000);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -41,29 +40,27 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
   const handleScroll = () => {
     if (scrollRef.current) {
       const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-      // Use a safe threshold to detect if the user is at the bottom
+      // Using a tighter threshold for better UX: if within 100px of bottom, consider "at bottom"
       isAtBottom.current = scrollHeight - scrollTop - clientHeight < 100;
     }
   };
 
-  // When messages arrive or change, scroll if the user was already at the bottom
+  // Only trigger auto-scroll when a NEW message arrives at the bottom
+  const lastMessageId = visibleMessages.length > 0 ? visibleMessages[visibleMessages.length - 1].id : null;
+  
   useEffect(() => {
-    if (isAtBottom.current) {
-      requestAnimationFrame(() => scrollToBottom('smooth'));
+    if (isAtBottom.current && lastMessageId) {
+      scrollToBottom('smooth');
     }
-  }, [messages.length, scrollToBottom]);
+  }, [lastMessageId, scrollToBottom]);
 
-  // Ensure scroll position is maintained on resize (e.g., mobile keyboard)
+  // Maintain scroll on resize (mobile keyboard)
   useEffect(() => {
     const handleResize = () => {
       if (isAtBottom.current) scrollToBottom('auto');
     };
     window.addEventListener('resize', handleResize);
-    window.visualViewport?.addEventListener('resize', handleResize);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      window.visualViewport?.removeEventListener('resize', handleResize);
-    };
+    return () => window.removeEventListener('resize', handleResize);
   }, [scrollToBottom]);
 
   const handleSubmit = (e?: React.FormEvent) => {
@@ -72,9 +69,9 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
     if (text) {
       onSendMessage(text);
       setInputText('');
+      // Force "at bottom" to true so we scroll to our own new message
       isAtBottom.current = true;
-      // Scroll to bottom immediately after sending to show user's own message
-      setTimeout(() => scrollToBottom('smooth'), 30);
+      setTimeout(() => scrollToBottom('smooth'), 50);
     }
   };
 
@@ -88,12 +85,12 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
         .message-disperse { animation: disperse 1s cubic-bezier(0.4, 0, 0.2, 1) forwards; pointer-events: none; }
       `}</style>
       
-      {/* WATERMARK BRANDING - Center Background */}
+      {/* WATERMARK BRANDING */}
       <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center opacity-[0.03] select-none z-0">
-        <h2 className="text-4xl md:text-5xl font-black uppercase tracking-tighter leading-none">Ghost Talk</h2>
-        <div className="flex flex-col items-center mt-3 text-center">
-          <p className="text-[10px] md:text-xs font-bold uppercase tracking-[0.4em] opacity-60">Chats fade after 5 minutes</p>
-          <p className="text-[10px] md:text-xs font-bold uppercase tracking-[0.4em] mt-1 opacity-60">Global resets after every 30 minutes</p>
+        <h2 className="text-3xl md:text-4xl font-black uppercase tracking-tighter leading-none">Ghost Talk</h2>
+        <div className="flex flex-col items-center mt-2 text-center">
+          <p className="text-[9px] md:text-[10px] font-bold uppercase tracking-[0.4em] opacity-60">Chats fade after five minutes</p>
+          <p className="text-[9px] md:text-[10px] font-bold uppercase tracking-[0.4em] mt-1 opacity-60">global resets after every 30 minutes</p>
         </div>
       </div>
 
@@ -141,6 +138,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
             </div>
           );
         })}
+        <div className="h-2 w-full shrink-0" />
       </div>
 
       {/* INPUT AREA */}
@@ -158,7 +156,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
           <button 
             type="submit" 
             disabled={!inputText.trim()} 
-            className="bg-blue-600 w-11 h-11 rounded-xl flex items-center justify-center shrink-0 disabled:opacity-20 active:scale-95 transition-transform shadow-lg shadow-blue-900/20"
+            className="bg-blue-600 w-11 h-11 rounded-xl flex items-center justify-center shrink-0 shadow-lg shadow-blue-900/20 active:scale-95"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
           </button>

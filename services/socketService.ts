@@ -3,71 +3,88 @@ import { io, Socket } from 'socket.io-client';
 import { User, Message, PrivateRoom, ChatRequest } from '../types';
 
 /**
- * SocketService using Socket.io to enable real-time communication
- * across different devices and browsers via the Node.js backend.
+ * SocketService with Hybrid Fallback.
+ * In environments without a backend (like AI Studio preview), 
+ * it uses BroadcastChannel to ensure messages still work.
  */
 
-interface SocketEventMap {
-  HEARTBEAT: { user: User; communityTimerEnd?: number; siteTimerEnd?: number };
-  MESSAGE: { message: Message };
-  CHAT_REQUEST: { request: ChatRequest };
-  CHAT_ACCEPT: { requestId: string; room: PrivateRoom };
-  CHAT_REJOIN: { reconnectCode: string };
-  CHAT_EXIT: { roomId: string };
-  CHAT_EXTEND: { roomId: string };
-  INIT_STATE: { communityMessages: Message[]; communityTimerEnd: number; siteTimerEnd: number };
-  RESET_COMMUNITY: { nextReset: number };
-  RESET_SITE: { nextReset: number };
-  CHAT_CLOSED: { roomId: string; reason: string };
-  CHAT_EXTENDED: { room: PrivateRoom };
-  ERROR: { message: string };
-}
-
 class SocketService {
-  private socket: Socket;
+  private socket: Socket | null = null;
+  private localBus: BroadcastChannel;
 
   constructor(user: User) {
-    // Connect to the same host that served the page
-    this.socket = io({
-      transports: ['websocket', 'polling']
-    });
+    this.localBus = new BroadcastChannel('ghosttalk_local_bus');
+    
+    // Attempt real socket connection
+    try {
+      this.socket = io({
+        transports: ['websocket', 'polling'],
+        reconnectionAttempts: 3,
+        timeout: 5000
+      });
 
-    // Send initial heartbeat once connected to ensure peer list is updated instantly
-    this.socket.on('connect', () => {
-      console.log('Socket connected, sending initial heartbeat');
-      this.sendHeartbeat(user);
-    });
-  }
+      this.socket.on('connect', () => {
+        console.log('GhostTalk: Connected to server');
+        this.sendHeartbeat(user);
+      });
 
-  /**
-   * Listen for events from the server.
-   * Returns a cleanup function to remove the listener.
-   */
-  on<T>(event: string, callback: (data: T) => void) {
-    this.socket.on(event, callback);
-    return () => {
-      this.socket.off(event, callback);
-    };
-  }
-
-  /**
-   * Emit events to the server.
-   */
-  emit(data: any) {
-    const { type, ...payload } = data;
-    if (type) {
-      this.socket.emit(type, payload);
-    } else {
-      this.socket.emit('MESSAGE', data);
+      this.socket.on('connect_error', () => {
+        console.warn('GhostTalk: Server unreachable, using local ghost-bus');
+      });
+    } catch (e) {
+      console.warn('GhostTalk: Socket initialization failed, using local fallback');
     }
   }
 
+  on<T>(event: string, callback: (data: T) => void) {
+    // Listen to real socket
+    if (this.socket) {
+      this.socket.on(event, callback);
+    }
+
+    // Listen to local broadcast bus (for preview/local support)
+    const handleLocal = (ev: MessageEvent) => {
+      // The event structure must match what the server sends
+      if (ev.data && ev.data.type === event) {
+        // We pass the whole data object so listeners can access data.message, data.request, etc.
+        callback(ev.data);
+      }
+    };
+    this.localBus.addEventListener('message', handleLocal);
+
+    return () => {
+      if (this.socket) this.socket.off(event, callback);
+      this.localBus.removeEventListener('message', handleLocal);
+    };
+  }
+
+  emit(data: any) {
+    // Ensure data has a type for our local bus
+    const emitData = data.type ? data : { type: 'MESSAGE', message: data };
+
+    // Send to server
+    if (this.socket && this.socket.connected) {
+      this.socket.emit(emitData.type, emitData);
+    }
+
+    // Local broadcast for Preview support
+    this.localBus.postMessage(emitData);
+    
+    // Trigger locally for the sender's tab
+    this.localBus.dispatchEvent(new MessageEvent('message', { data: emitData }));
+  }
+
   sendHeartbeat(user: User) {
-    this.socket.emit('HEARTBEAT', { user });
+    const data = { type: 'HEARTBEAT', user };
+    if (this.socket && this.socket.connected) {
+      this.socket.emit('HEARTBEAT', data);
+    }
+    this.localBus.postMessage(data);
   }
 
   close() {
-    this.socket.close();
+    if (this.socket) this.socket.close();
+    this.localBus.close();
   }
 }
 
