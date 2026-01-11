@@ -1,76 +1,76 @@
 
+import { io, Socket } from 'socket.io-client';
 import { User, Message, PrivateRoom, ChatRequest } from '../types';
 
 /**
- * Enhanced SocketService using BroadcastChannel for multi-tab communication.
- * This ensures the "anonymous chat" works immediately in the browser demo
- * environment where a persistent Node.js backend might not be reachable.
+ * SocketService using Socket.io to enable real-time communication
+ * across different devices and browsers via the Node.js backend.
  */
 
-type SocketEvent = 
-  | { type: 'HEARTBEAT'; user: User; communityTimerEnd?: number; siteTimerEnd?: number }
-  | { type: 'MESSAGE'; message: Message }
-  | { type: 'CHAT_REQUEST'; request: ChatRequest }
-  | { type: 'CHAT_ACCEPT'; requestId: string; room: PrivateRoom }
-  | { type: 'CHAT_REJOIN'; reconnectCode: string }
-  | { type: 'CHAT_EXIT'; roomId: string }
-  | { type: 'CHAT_EXTEND'; roomId: string }
-  | { type: 'INIT_STATE'; communityMessages: Message[]; communityTimerEnd: number; siteTimerEnd: number }
-  | { type: 'RESET_COMMUNITY'; nextReset: number }
-  | { type: 'RESET_SITE'; nextReset: number }
-  | { type: 'ERROR'; message: string };
+interface SocketEventMap {
+  HEARTBEAT: { user: User; communityTimerEnd?: number; siteTimerEnd?: number };
+  MESSAGE: { message: Message };
+  CHAT_REQUEST: { request: ChatRequest };
+  CHAT_ACCEPT: { requestId: string; room: PrivateRoom };
+  CHAT_REJOIN: { reconnectCode: string };
+  CHAT_EXIT: { roomId: string };
+  CHAT_EXTEND: { roomId: string };
+  INIT_STATE: { communityMessages: Message[]; communityTimerEnd: number; siteTimerEnd: number };
+  RESET_COMMUNITY: { nextReset: number };
+  RESET_SITE: { nextReset: number };
+  CHAT_CLOSED: { roomId: string; reason: string };
+  CHAT_EXTENDED: { room: PrivateRoom };
+  ERROR: { message: string };
+}
 
 class SocketService {
-  private channel: BroadcastChannel;
-  private localListeners: Map<string, Set<(data: any) => void>> = new Map();
+  private socket: Socket;
 
   constructor(user: User) {
-    this.channel = new BroadcastChannel('ghost_talk_v3');
-    
-    // Broadcast self-presence on connection
-    setTimeout(() => this.sendHeartbeat(user), 500);
+    // Connect to the same host that served the page
+    this.socket = io({
+      transports: ['websocket', 'polling']
+    });
 
-    this.channel.onmessage = (event: MessageEvent<any>) => {
-      const data = event.data;
-      const eventType = data.type;
-      
-      if (this.localListeners.has(eventType)) {
-        this.localListeners.get(eventType)?.forEach(cb => cb(data));
-      }
-    };
+    // Send initial heartbeat once connected
+    this.socket.on('connect', () => {
+      this.sendHeartbeat(user);
+    });
   }
 
+  /**
+   * Listen for events from the server.
+   * Returns a cleanup function to remove the listener.
+   */
   on<T>(event: string, callback: (data: T) => void) {
-    if (!this.localListeners.has(event)) {
-      this.localListeners.set(event, new Set());
-    }
-    this.localListeners.get(event)?.add(callback);
-
-    // Return cleanup function
+    this.socket.on(event, callback);
     return () => {
-      this.localListeners.get(event)?.delete(callback);
+      this.socket.off(event, callback);
     };
   }
 
+  /**
+   * Emit events to the server.
+   */
   emit(data: any) {
-    const payload = data.type ? data : { ...data, type: 'MESSAGE' };
-    
-    // Relay to other tabs
-    this.channel.postMessage(payload);
-    
-    // Also trigger for the current tab (simulate loopback)
-    if (this.localListeners.has(payload.type)) {
-      this.localListeners.get(payload.type)?.forEach(cb => cb(payload));
+    const { type, ...payload } = data;
+    // The server expects the 'type' to be the event name if using standard socket.io patterns,
+    // or it expects the whole object if the server listener is generic.
+    // Based on server.js, it listens for specific strings like 'MESSAGE', 'HEARTBEAT', etc.
+    if (type) {
+      this.socket.emit(type, payload);
+    } else {
+      // Fallback for objects that might already be formatted for the old system
+      this.socket.emit('MESSAGE', data);
     }
   }
 
   sendHeartbeat(user: User) {
-    this.emit({ type: 'HEARTBEAT', user });
+    this.socket.emit('HEARTBEAT', { user });
   }
 
   close() {
-    this.channel.close();
-    this.localListeners.clear();
+    this.socket.close();
   }
 }
 

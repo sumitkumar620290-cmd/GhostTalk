@@ -5,12 +5,6 @@ import { generateId, generateUsername, generateReconnectCode } from './utils/hel
 import SocketService from './services/socketService';
 import ChatBox from './components/ChatBox';
 
-interface InitStatePayload {
-  communityMessages: Message[];
-  communityTimerEnd: number;
-  siteTimerEnd: number;
-}
-
 interface HeartbeatPayload {
   user: User;
   communityTimerEnd?: number;
@@ -19,10 +13,6 @@ interface HeartbeatPayload {
 
 interface MessagePayload {
   message: Message;
-}
-
-interface ResetCommunityPayload {
-  nextReset: number;
 }
 
 interface ChatRequestPayload {
@@ -36,10 +26,6 @@ interface ChatAcceptPayload {
 interface ChatClosedPayload {
   roomId: string;
   reason: string;
-}
-
-interface ErrorPayload {
-  message: string;
 }
 
 const App: React.FC = () => {
@@ -73,7 +59,7 @@ const App: React.FC = () => {
     isOpenToPrivateRef.current = isOpenToPrivate;
   }, [isOpenToPrivate]);
 
-  const [commTimerEnd] = useState<number>(Date.now() + 1800000); // 30 mins
+  const [commTimerEnd, setCommTimerEnd] = useState<number>(Date.now() + 1800000); 
   const [messages, setMessages] = useState<Message[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<string>('community');
   const [activeRoomType, setActiveRoomType] = useState<RoomType>(RoomType.COMMUNITY);
@@ -101,11 +87,9 @@ const App: React.FC = () => {
       const now = Date.now();
       setCurrentTime(now);
 
-      // Clean up stale users (inactive for 15s)
       setOnlineUsers(prev => {
         const next = new Map<string, User>(prev);
         let changed = false;
-        // Fix: Explicitly type 'user' and 'id' in the forEach loop to ensure correct type inference on line 109
         next.forEach((user: User, id: string) => {
           if (now - user.lastActive > 15000) {
             next.delete(id);
@@ -120,7 +104,6 @@ const App: React.FC = () => {
         if (remaining > 0 && remaining <= 300000 && !room.extended && showExtendPopup !== room.id) {
           setShowExtendPopup(room.id);
         } else if (remaining <= 0) {
-          // Local expiry check
           setPrivateRooms(prev => {
             const next = new Map(prev);
             next.delete(room.id);
@@ -206,12 +189,13 @@ const App: React.FC = () => {
         next.set(data.user.id, { ...data.user, lastActive: Date.now() });
         return next;
       });
+      if (data.communityTimerEnd) setCommTimerEnd(data.communityTimerEnd);
     });
 
     const unsubMsg = socket.on<MessagePayload>('MESSAGE', (data) => {
       setMessages(prev => {
         if (prev.find(m => m.id === data.message.id)) return prev;
-        return [...prev, data.message].slice(-300); // Buffer limit
+        return [...prev, data.message].slice(-300);
       });
     });
 
@@ -264,20 +248,13 @@ const App: React.FC = () => {
       }
     });
 
-    const unsubExit = socket.on<{roomId: string}>('CHAT_EXIT', (data) => {
-      setPrivateRooms(prev => {
-        const next = new Map(prev);
-        next.delete(data.roomId);
-        return next;
-      });
-      if (activeRoomId === data.roomId) {
-        setActiveRoomId('community');
-        setActiveRoomType(RoomType.COMMUNITY);
-      }
+    const unsubInit = socket.on<any>('INIT_STATE', (data) => {
+      if (data.communityMessages) setMessages(data.communityMessages);
+      if (data.communityTimerEnd) setCommTimerEnd(data.communityTimerEnd);
     });
 
     return () => {
-      unsubHB(); unsubMsg(); unsubReq(); unsubAccept(); unsubExtended(); unsubClosed(); unsubExit();
+      unsubHB(); unsubMsg(); unsubReq(); unsubAccept(); unsubExtended(); unsubClosed(); unsubInit();
     };
   }, [socket, activeRoomId]);
 
