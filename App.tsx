@@ -28,6 +28,10 @@ interface ChatClosedPayload {
   reason: string;
 }
 
+interface ErrorPayload {
+  message: string;
+}
+
 const App: React.FC = () => {
   const BMC_LINK = "https://buymeacoffee.com/";
   
@@ -42,11 +46,11 @@ const App: React.FC = () => {
     id: generateId(),
     username: generateUsername(),
     lastActive: Date.now(),
-    acceptingRequests: false, 
+    acceptingRequests: true,
     isDeciding: false
   }));
 
-  const [isOpenToPrivate, setIsOpenToPrivate] = useState(false);
+  const [isOpenToPrivate, setIsOpenToPrivate] = useState(true);
   const [hiddenUserIds] = useState<Set<string>>(new Set());
   const [sentRequestIds, setSentRequestIds] = useState<Set<string>>(new Set());
   const [userPopup, setUserPopup] = useState<{ userId: string, username: string } | null>(null);
@@ -251,10 +255,25 @@ const App: React.FC = () => {
     const unsubInit = socket.on<any>('INIT_STATE', (data) => {
       if (data.communityMessages) setMessages(data.communityMessages);
       if (data.communityTimerEnd) setCommTimerEnd(data.communityTimerEnd);
+      if (data.onlineUsers) {
+        setOnlineUsers(prev => {
+          const next = new Map(prev);
+          data.onlineUsers.forEach((u: User) => {
+            if (u.id !== currentUserIdRef.current) {
+               next.set(u.id, { ...u, lastActive: Date.now() });
+            }
+          });
+          return next;
+        });
+      }
+    });
+
+    const unsubError = socket.on<ErrorPayload>('ERROR', (data) => {
+      alert(data.message);
     });
 
     return () => {
-      unsubHB(); unsubMsg(); unsubReq(); unsubAccept(); unsubExtended(); unsubClosed(); unsubInit();
+      unsubHB(); unsubMsg(); unsubReq(); unsubAccept(); unsubExtended(); unsubClosed(); unsubInit(); unsubError();
     };
   }, [socket, activeRoomId]);
 
@@ -289,116 +308,97 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-col md:flex-row h-[100dvh] w-screen overflow-hidden bg-slate-950 text-slate-100 selection:bg-blue-500/30">
-      <aside className="hidden md:flex flex-col w-72 bg-slate-900 border-r border-white/5 shrink-0 p-8">
-        <div className="flex flex-col items-start mb-10">
-          <div className="w-12 h-12 bg-blue-600/10 rounded-2xl flex items-center justify-center mb-4 border border-blue-600/20 shadow-xl overflow-hidden group hover:scale-105 transition-transform">
-            <span className="text-2xl">👻</span>
+      <aside className="hidden md:flex flex-col w-64 bg-slate-900 border-r border-white/5 shrink-0 p-6">
+        <div className="flex flex-col items-start mb-8">
+          <div className="w-10 h-10 bg-blue-600/10 rounded-xl flex items-center justify-center mb-3 border border-blue-600/20 shadow-xl group hover:scale-105 transition-transform">
+            <span className="text-xl">👻</span>
           </div>
           <div>
-            <p className="text-xl font-black tracking-tighter leading-none text-white">GhostTalk</p>
-            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-2 leading-tight">Temporary conversations.<br/>No identity. No memory.</p>
+            <p className="text-lg font-black tracking-tighter leading-none text-white">GhostTalk</p>
+            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1 leading-tight">Ephemeral messaging.</p>
           </div>
         </div>
         
-        <div className="space-y-8 mb-auto">
+        <div className="space-y-6 mb-auto">
           <div>
-            <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-4">Identity</h4>
-            <div className="bg-slate-800/50 p-3 rounded-xl border border-white/5">
-              <p className="text-[10px] text-slate-500 uppercase font-black mb-1">Your Ghost ID</p>
-              <p className="text-sm font-mono font-bold text-blue-400">{currentUser.username}</p>
+            <h4 className="text-[9px] font-black uppercase text-slate-500 tracking-widest mb-3">Identity</h4>
+            <div className="bg-slate-800/50 p-3 rounded-lg border border-white/5">
+              <p className="text-[9px] text-slate-500 uppercase font-black mb-0.5">Ghost ID</p>
+              <p className="text-xs font-mono font-bold text-blue-400">{currentUser.username}</p>
             </div>
           </div>
 
           <div>
-            <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-3">Guidelines</h4>
-            <ul className="text-[11px] text-slate-400 space-y-3 font-medium">
-              <li className="flex items-start"><span className="text-blue-500 mr-2">✔</span> Total anonymity</li>
-              <li className="flex items-start"><span className="text-blue-500 mr-2">✔</span> Mutual consent for private</li>
-              <li className="flex items-start"><span className="text-red-500 mr-2">✘</span> No persistent data</li>
+            <h4 className="text-[9px] font-black uppercase text-slate-500 tracking-widest mb-2">Rules</h4>
+            <ul className="text-[10px] text-slate-400 space-y-2 font-medium">
+              <li className="flex items-start"><span className="text-blue-500 mr-1.5">✔</span> Total Anonymity</li>
+              <li className="flex items-start"><span className="text-blue-500 mr-1.5">✔</span> No Logs</li>
+              <li className="flex items-start"><span className="text-red-500 mr-1.5">✘</span> No Identity</li>
             </ul>
           </div>
         </div>
 
-        <div className="mt-8 space-y-3">
-          <button onClick={() => setShowReconnectModal(true)} className="w-full py-3 bg-slate-800 rounded-xl text-[10px] font-black uppercase border border-white/5 flex items-center justify-center space-x-2 hover:bg-slate-700 transition-colors">
-            <span>🔑</span><span>Restore Key</span>
+        <div className="mt-6 space-y-2">
+          <button onClick={() => setShowReconnectModal(true)} className="w-full py-2.5 bg-slate-800 rounded-lg text-[9px] font-black uppercase border border-white/5 flex items-center justify-center space-x-1.5 hover:bg-slate-700 transition-colors">
+            <span>🔑</span><span>Restore</span>
           </button>
-          <a href={BMC_LINK} target="_blank" rel="noopener noreferrer" className="w-full py-4 bg-blue-600/10 text-blue-400 rounded-xl text-[10px] font-black uppercase text-center border border-blue-600/20 hover:bg-blue-600/20 transition-all flex items-center justify-center space-x-2">
-            <span>☕</span><span>Support Dev</span>
-          </a>
+          <a href={BMC_LINK} target="_blank" rel="noopener noreferrer" className="w-full py-2.5 bg-blue-600/10 text-blue-400 rounded-lg text-[9px] font-black uppercase text-center border border-blue-600/20 hover:bg-blue-600/20 transition-all">Support Dev</a>
         </div>
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <header className="z-50 h-16 md:h-20 bg-slate-900/90 backdrop-blur-xl border-b border-white/5 flex items-center justify-between px-3 md:px-8 shrink-0">
-          <div className="flex items-center space-x-3 md:hidden">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-xs shadow-lg shadow-blue-900/40">👻</div>
-            <span className="text-[11px] font-black tracking-widest uppercase text-white">GhostTalk</span>
+        <header className="z-50 h-14 md:h-16 bg-slate-900/90 backdrop-blur-xl border-b border-white/5 flex items-center justify-between px-4 md:px-6 shrink-0">
+          <div className="flex items-center space-x-2 md:hidden">
+            <div className="w-7 h-7 bg-blue-600 rounded flex items-center justify-center text-[10px] shadow-lg">👻</div>
           </div>
           
           <button 
             onClick={() => setIsOpenToPrivate(!isOpenToPrivate)}
-            className={`flex items-center space-x-3 px-4 md:px-6 py-2 rounded-full border transition-all ${isOpenToPrivate ? 'bg-blue-600 text-white border-blue-400 shadow-lg' : 'bg-slate-800 border-white/10 text-slate-400'}`}
+            className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-full border transition-all ${isOpenToPrivate ? 'bg-blue-600 text-white border-blue-400' : 'bg-slate-800 border-white/10 text-slate-400'}`}
           >
-            <span className="text-[9px] md:text-xs font-black uppercase tracking-widest leading-none">Secret Invites</span>
-            <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded-md bg-black/20">{isOpenToPrivate ? 'Enabled' : 'Disabled'}</span>
+            <span className="text-[9px] font-black uppercase tracking-widest leading-none">Secret Invites</span>
+            <span className="text-[8px] font-bold uppercase px-1 py-0.5 rounded bg-black/20">{isOpenToPrivate ? 'ON' : 'OFF'}</span>
           </button>
 
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-2">
             <div className="relative">
-              <button onClick={() => setShowNotificationMenu(!showNotificationMenu)} className={`p-2 bg-slate-800 hover:bg-slate-700 rounded-xl transition-all border border-white/5 ${activeIncomingRequest ? 'animate-bell-shake' : ''}`}>
-                <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${activeIncomingRequest ? 'text-blue-400' : 'text-slate-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              <button onClick={() => setShowNotificationMenu(!showNotificationMenu)} className={`p-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-all border border-white/5 ${activeIncomingRequest ? 'animate-bell-shake text-blue-400' : 'text-slate-400'}`}>
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                 </svg>
-                {activeIncomingRequest && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-slate-900"></span>}
+                {activeIncomingRequest && <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full"></span>}
               </button>
               {showNotificationMenu && (
-                <div className="absolute right-0 mt-3 w-64 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl z-[100] p-4 animate-in fade-in zoom-in-95">
-                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4">Transmission</div>
+                <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-white/10 rounded-xl shadow-2xl z-[100] p-3 animate-in fade-in zoom-in-95">
                   {activeIncomingRequest ? (
-                    <div className="space-y-3">
-                      <p className="text-[11px] font-bold text-white"><span className="text-blue-400 font-mono">{activeIncomingRequest.fromName}</span> requests a private link.</p>
-                      <div className="flex space-x-2">
-                        <button onClick={() => { setActiveIncomingRequest(null); setShowNotificationMenu(false); }} className="flex-1 py-2 bg-slate-800 rounded-lg text-[9px] font-black uppercase text-slate-400 hover:bg-slate-700 transition-colors">Decline</button>
-                        <button onClick={() => acceptRequest(activeIncomingRequest)} className="flex-1 py-2 bg-blue-600 rounded-lg text-[9px] font-black uppercase text-white hover:bg-blue-500 shadow-lg shadow-blue-900/40">Accept</button>
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-bold text-white leading-snug"><span className="text-blue-400">{activeIncomingRequest.fromName}</span> sent an invite.</p>
+                      <div className="flex space-x-1.5">
+                        <button onClick={() => { setActiveIncomingRequest(null); setShowNotificationMenu(false); }} className="flex-1 py-1.5 bg-slate-800 rounded text-[8px] font-black uppercase text-slate-400">Decline</button>
+                        <button onClick={() => acceptRequest(activeIncomingRequest)} className="flex-1 py-1.5 bg-blue-600 rounded text-[8px] font-black uppercase text-white shadow-lg shadow-blue-900/40">Accept</button>
                       </div>
                     </div>
-                  ) : <div className="text-center text-[10px] text-slate-600 py-4 uppercase tracking-tighter">Silence in the static</div>}
+                  ) : <div className="text-center text-[9px] text-slate-600 py-2 font-bold uppercase tracking-widest">No Alerts</div>}
                 </div>
               )}
             </div>
-            <button onClick={() => setShowPeers(!showPeers)} className="p-2 bg-slate-800 rounded-xl relative border border-white/5 active:scale-90 transition-transform">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-              {onlineUsers.size > 1 && <span className="absolute -top-1 -right-1 bg-blue-600 text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center border-2 border-slate-900 text-white">{onlineUsers.size - 1}</span>}
+            <button onClick={() => setShowPeers(!showPeers)} className="p-2 bg-slate-800 rounded-lg relative border border-white/5 transition-transform active:scale-90">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+              {onlineUsers.size > 1 && <span className="absolute -top-1 -right-1 bg-blue-600 text-[8px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center border border-slate-900 text-white">{onlineUsers.size - 1}</span>}
             </button>
           </div>
         </header>
 
         <main className="flex-1 flex overflow-hidden relative">
           <div className="flex-1 flex flex-col relative bg-slate-950 overflow-hidden">
-            {activePrivateRoom && (
-              <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[45] w-[calc(100%-2rem)] max-w-sm">
-                <div className="bg-indigo-600 p-5 rounded-3xl shadow-2xl border border-white/20 animate-in slide-in-from-top-4 duration-500">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[10px] font-black uppercase tracking-widest opacity-80 text-white">Secret Session Key</span>
-                    <span className="px-2 py-0.5 bg-white/20 rounded-full text-[8px] font-black uppercase text-white">Ephemeral</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="text-3xl font-mono font-black tracking-widest text-white">{activePrivateRoom.reconnectCode}</div>
-                    <div className="text-[9px] font-bold text-white/70 max-w-[120px] text-right leading-tight uppercase">Save this code to rejoin if disconnected.</div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="absolute top-4 left-0 right-0 z-30 flex justify-center pointer-events-none">
-              <div className="flex bg-slate-900/80 backdrop-blur-xl p-1.5 rounded-2xl border border-white/10 pointer-events-auto shadow-2xl">
+            <div className="absolute top-2 left-0 right-0 z-30 flex justify-center pointer-events-none">
+              <div className="flex bg-slate-900/80 backdrop-blur-xl p-1 rounded-xl border border-white/10 pointer-events-auto shadow-xl scale-90 md:scale-100">
                 <button 
                   onClick={() => { setActiveRoomId('community'); setActiveRoomType(RoomType.COMMUNITY); }}
-                  className={`px-6 py-2 rounded-xl flex flex-col items-center transition-all ${activeRoomType === RoomType.COMMUNITY ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/30' : 'text-slate-500 hover:text-slate-300'}`}
+                  className={`px-4 py-1.5 rounded-lg flex items-center space-x-2 transition-all ${activeRoomType === RoomType.COMMUNITY ? 'bg-blue-600 text-white' : 'text-slate-500'}`}
                 >
-                  <span className="text-[10px] font-black uppercase tracking-widest">Global</span>
-                  <span className="text-[8px] font-bold opacity-80 mt-0.5">{timeLeftGlobal}</span>
+                  <span className="text-[9px] font-black uppercase tracking-widest">Global</span>
+                  <span className="text-[8px] font-bold opacity-70">{timeLeftGlobal}</span>
                 </button>
                 {[...privateRooms.values()].map((room: PrivateRoom) => {
                   const rem = Math.max(0, room.expiresAt - currentTime);
@@ -407,19 +407,19 @@ const App: React.FC = () => {
                   const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
                   
                   return (
-                    <div key={room.id} className="flex ml-1.5 items-stretch">
+                    <div key={room.id} className="flex ml-1 items-stretch">
                       <button 
                         onClick={() => { setActiveRoomId(room.id); setActiveRoomType(RoomType.PRIVATE); }}
-                        className={`px-6 py-2 rounded-l-xl flex flex-col items-center transition-all ${activeRoomId === room.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30' : 'bg-slate-800 text-slate-500'}`}
+                        className={`px-4 py-1.5 rounded-l-lg flex items-center space-x-2 transition-all ${activeRoomId === room.id ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-500'}`}
                       >
-                        <span className="text-[10px] font-black uppercase tracking-widest">Secret</span>
-                        <span className="text-[8px] font-bold opacity-80 mt-0.5">{timeStr}</span>
+                        <span className="text-[9px] font-black uppercase tracking-widest">Secret</span>
+                        <span className="text-[8px] font-bold opacity-70">{timeStr}</span>
                       </button>
                       <button 
                         onClick={(e) => { e.stopPropagation(); exitPrivateRoom(room.id); }}
-                        className={`px-3 flex items-center justify-center rounded-r-xl transition-all border-l border-white/10 hover:bg-red-500/30 hover:text-red-300 ${activeRoomId === room.id ? 'bg-indigo-700 text-white/80' : 'bg-slate-900 text-slate-600'}`}
+                        className={`px-2 flex items-center justify-center rounded-r-lg transition-all border-l border-white/10 hover:bg-red-500/30 ${activeRoomId === room.id ? 'bg-indigo-700 text-white' : 'bg-slate-900 text-slate-600'}`}
                       >
-                        <span className="text-[10px] font-black uppercase">✕</span>
+                        <span className="text-[9px] font-black">✕</span>
                       </button>
                     </div>
                   );
@@ -429,8 +429,8 @@ const App: React.FC = () => {
 
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
               {isFinalFive && (
-                <div className="z-20 bg-indigo-500/20 text-indigo-300 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-center animate-pulse border-b border-white/5">
-                  ✨ Static fading... Share your contact details now if you wish to stay connected. ✨
+                <div className="z-20 bg-indigo-500/20 text-indigo-300 px-3 py-1.5 text-[8px] font-black uppercase tracking-widest text-center animate-pulse border-b border-white/5">
+                  The static is closing in... session fading soon.
                 </div>
               )}
               <ChatBox 
@@ -444,44 +444,37 @@ const App: React.FC = () => {
             </div>
 
             {userPopup && (
-              <div className="fixed inset-0 z-[80] flex items-center justify-center p-6">
-                <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-md" onClick={() => setUserPopup(null)}></div>
-                <div className="relative bg-slate-900 border border-white/10 p-8 rounded-[2.5rem] w-64 shadow-2xl animate-in zoom-in-95 duration-300">
-                  <div className="w-16 h-16 bg-blue-600/10 rounded-2xl flex items-center justify-center mx-auto mb-6 text-2xl border border-blue-600/20 shadow-inner">👻</div>
-                  <h4 className="text-center font-black text-xl mb-6 truncate text-white">{userPopup.username}</h4>
-                  <div className="space-y-3">
+              <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+                <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" onClick={() => setUserPopup(null)}></div>
+                <div className="relative bg-slate-900 border border-white/10 p-6 rounded-[2rem] w-60 shadow-2xl animate-in zoom-in-95">
+                  <div className="w-12 h-12 bg-blue-600/10 rounded-xl flex items-center justify-center mx-auto mb-4 text-xl border border-blue-600/20">👻</div>
+                  <h4 className="text-center font-black text-sm mb-5 truncate text-white">{userPopup.username}</h4>
+                  <div className="space-y-2">
                     <button 
                       disabled={sentRequestIds.has(userPopup.userId) || privateRooms.size > 0}
                       onClick={() => { const target = onlineUsers.get(userPopup.userId); if (target) sendRequest(target); }}
-                      className="w-full py-4 bg-blue-600 text-white font-black rounded-2xl text-[10px] uppercase tracking-widest active:scale-95 disabled:opacity-30 shadow-lg shadow-blue-900/20 transition-all hover:bg-blue-500"
-                    >{sentRequestIds.has(userPopup.userId) ? 'Signal Sent' : 'Request Secret'}</button>
-                    <button onClick={() => setUserPopup(null)} className="w-full py-2 text-slate-600 font-bold uppercase text-[9px] text-center hover:text-slate-400 transition-colors">Close</button>
+                      className="w-full py-3 bg-blue-600 text-white font-black rounded-xl text-[9px] uppercase tracking-widest disabled:opacity-30"
+                    >{sentRequestIds.has(userPopup.userId) ? 'Sent' : 'Private Request'}</button>
+                    <button onClick={() => setUserPopup(null)} className="w-full py-2 text-slate-600 font-bold uppercase text-[8px] text-center">Close</button>
                   </div>
                 </div>
               </div>
             )}
           </div>
 
-          <aside className={`fixed inset-y-0 right-0 z-[70] w-64 bg-slate-900 border-l border-white/5 transform transition-transform duration-500 ease-out ${showPeers ? 'translate-x-0 shadow-2xl' : 'translate-x-full'}`}>
-            <div className="h-full flex flex-col p-6">
-              <div className="flex items-center justify-between mb-8">
-                <h3 className="font-black text-white/50 uppercase text-[10px] tracking-widest">Active Apparitions</h3>
-                <button onClick={() => setShowPeers(false)} className="text-slate-500 hover:text-white transition-colors">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                </button>
+          <aside className={`fixed inset-y-0 right-0 z-[70] w-60 bg-slate-900 border-l border-white/5 transform transition-transform duration-300 ${showPeers ? 'translate-x-0 shadow-2xl' : 'translate-x-full'}`}>
+            <div className="h-full flex flex-col p-5">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="font-black text-white/40 uppercase text-[9px] tracking-widest">Peers</h3>
+                <button onClick={() => setShowPeers(false)} className="text-slate-500 hover:text-white">✕</button>
               </div>
-              <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar">
+              <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
                 {[...onlineUsers.values()].filter((u: User) => u.id !== currentUser.id).map((u: User) => (
-                  <button key={u.id} onClick={() => setUserPopup({ userId: u.id, username: u.username })} className="w-full text-left p-4 bg-white/[0.03] border border-white/[0.05] rounded-2xl transition-all hover:bg-white/[0.06] hover:border-white/10 group">
-                    <p className="text-xs font-black truncate text-white group-hover:text-blue-400 transition-colors">{u.username}</p>
-                    <span className={`text-[8px] font-bold uppercase mt-1 block ${u.acceptingRequests ? 'text-blue-500' : 'text-slate-600'}`}>{u.acceptingRequests ? 'Accepting Invites' : 'Static Only'}</span>
+                  <button key={u.id} onClick={() => setUserPopup({ userId: u.id, username: u.username })} className="w-full text-left p-3 bg-white/[0.02] border border-white/[0.04] rounded-xl group transition-colors hover:bg-white/[0.05]">
+                    <p className="text-[11px] font-bold truncate text-white group-hover:text-blue-400">{u.username}</p>
+                    <span className={`text-[7px] font-bold uppercase mt-0.5 block ${u.acceptingRequests ? 'text-blue-500' : 'text-slate-700'}`}>{u.acceptingRequests ? 'Accepting' : 'Busy'}</span>
                   </button>
                 ))}
-                {onlineUsers.size <= 1 && (
-                  <div className="text-center py-10 opacity-20">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Tuning frequencies...</p>
-                  </div>
-                )}
               </div>
             </div>
           </aside>
@@ -489,56 +482,44 @@ const App: React.FC = () => {
       </div>
 
       {showExtendPopup && (
-        <div className="fixed inset-0 z-[110] bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-6 animate-in fade-in duration-500">
-          <div className="bg-slate-900 p-8 rounded-[3rem] w-full max-w-sm border border-white/10 shadow-2xl text-center shadow-indigo-900/20">
-            <div className="text-4xl mb-6">⏳</div>
-            <h3 className="text-xl font-black text-white uppercase tracking-tight mb-2">Static Increasing</h3>
-            <p className="text-xs text-slate-400 mb-8 leading-relaxed">The secret channel is fading. Would you like to stabilize the connection for 30 more minutes?</p>
-            <div className="space-y-3">
-              <button 
-                onClick={() => extendPrivateRoom(showExtendPopup)}
-                className="w-full py-4 bg-blue-600 text-white font-black rounded-2xl text-[10px] uppercase tracking-widest active:scale-95 shadow-lg shadow-blue-900/30"
-              >Stabilize Connection</button>
-              <button 
-                onClick={() => setShowExtendPopup(null)}
-                className="w-full py-3 bg-slate-800 text-slate-500 font-bold rounded-xl text-[10px] uppercase"
-              >Let it fade</button>
+        <div className="fixed inset-0 z-[110] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-6">
+          <div className="bg-slate-900 p-6 rounded-[2rem] w-full max-w-[280px] border border-white/10 text-center">
+            <h3 className="text-sm font-black text-white uppercase tracking-tighter mb-2">Channel Fading</h3>
+            <p className="text-[10px] text-slate-400 mb-6 px-2">Extend the connection by 30 minutes?</p>
+            <div className="space-y-2">
+              <button onClick={() => extendPrivateRoom(showExtendPopup)} className="w-full py-3 bg-blue-600 text-white font-black rounded-xl text-[9px] uppercase tracking-widest shadow-lg shadow-blue-900/40">Extend Link</button>
+              <button onClick={() => setShowExtendPopup(null)} className="w-full py-2.5 bg-slate-800 text-slate-500 font-bold rounded-lg text-[9px] uppercase">Let it fade</button>
             </div>
           </div>
         </div>
       )}
 
       {showReconnectModal && (
-        <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-xl flex items-center justify-center z-[100] p-4 animate-in fade-in duration-500">
-          <div className="bg-slate-900 p-9 rounded-[3rem] w-full max-w-sm border border-white/5 shadow-2xl">
-            <div className="text-center mb-8">
-              <div className="w-16 h-16 bg-blue-600/10 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-6 border border-blue-600/20">🔑</div>
-              <h3 className="text-xl font-black text-white uppercase tracking-tighter">Transmission Key</h3>
-              <p className="text-[10px] text-slate-500 font-bold mt-2 uppercase tracking-wide">Enter code to restore a fading link</p>
+        <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-xl flex items-center justify-center z-[100] p-4">
+          <div className="bg-slate-900 p-8 rounded-[2rem] w-full max-w-[320px] border border-white/5">
+            <div className="text-center mb-6">
+              <h3 className="text-lg font-black text-white uppercase tracking-tighter">Restore Key</h3>
+              <p className="text-[9px] text-slate-500 font-bold mt-1 uppercase tracking-widest">Enter the secret session code</p>
             </div>
             <input 
               type="text" 
               maxLength={6} 
               value={reconnectInput} 
               onChange={(e) => setReconnectInput(e.target.value.toUpperCase())} 
-              className="w-full bg-slate-950 border-2 border-slate-800 rounded-2xl p-6 text-3xl text-center font-mono font-black tracking-[0.4em] text-blue-400 mb-8 outline-none focus:border-blue-500/50 transition-colors" 
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-2xl text-center font-mono font-black tracking-[0.3em] text-blue-400 mb-6 outline-none focus:border-blue-500/50" 
               placeholder="••••••" 
             />
-            <button 
-              onClick={() => { socket.emit({ type: 'CHAT_REJOIN', reconnectCode: reconnectInput }); setShowReconnectModal(false); }} 
-              className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 shadow-xl shadow-blue-900/30"
-            >Link Frequencies</button>
-            <button onClick={() => setShowReconnectModal(false)} className="w-full py-4 mt-2 text-slate-500 font-bold uppercase text-[10px] w-full text-center hover:text-slate-300 transition-colors">Abort</button>
+            <button onClick={() => { socket.emit({ type: 'CHAT_REJOIN', reconnectCode: reconnectInput }); setShowReconnectModal(false); }} className="w-full py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg shadow-blue-900/40">Link Channel</button>
+            <button onClick={() => setShowReconnectModal(false)} className="w-full py-3 mt-1 text-slate-600 font-bold uppercase text-[9px]">Cancel</button>
           </div>
         </div>
       )}
 
       <style>{`
-        @keyframes bell-shake { 0% { transform: rotate(0); } 15% { transform: rotate(10deg); } 30% { transform: rotate(-10deg); } 45% { transform: rotate(8deg); } 60% { transform: rotate(-8deg); } 75% { transform: rotate(4deg); } 85% { transform: rotate(-4deg); } 100% { transform: rotate(0); } }
-        .animate-bell-shake { animation: bell-shake 0.8s cubic-bezier(.36,.07,.19,.97) infinite; transform-origin: top; }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        @keyframes bell-shake { 0% { transform: rotate(0); } 15% { transform: rotate(8deg); } 30% { transform: rotate(-8deg); } 45% { transform: rotate(4deg); } 60% { transform: rotate(-4deg); } 100% { transform: rotate(0); } }
+        .animate-bell-shake { animation: bell-shake 0.8s ease-in-out infinite; transform-origin: top; }
+        .custom-scrollbar::-webkit-scrollbar { width: 3px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.05); border-radius: 10px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(59, 130, 246, 0.2); }
       `}</style>
     </div>
   );

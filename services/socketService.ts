@@ -32,8 +32,9 @@ class SocketService {
       transports: ['websocket', 'polling']
     });
 
-    // Send initial heartbeat once connected
+    // Send initial heartbeat once connected to ensure peer list is updated instantly
     this.socket.on('connect', () => {
+      console.log('Socket connected, sending initial heartbeat');
       this.sendHeartbeat(user);
     });
   }
@@ -54,13 +55,9 @@ class SocketService {
    */
   emit(data: any) {
     const { type, ...payload } = data;
-    // The server expects the 'type' to be the event name if using standard socket.io patterns,
-    // or it expects the whole object if the server listener is generic.
-    // Based on server.js, it listens for specific strings like 'MESSAGE', 'HEARTBEAT', etc.
     if (type) {
       this.socket.emit(type, payload);
     } else {
-      // Fallback for objects that might already be formatted for the old system
       this.socket.emit('MESSAGE', data);
     }
   }

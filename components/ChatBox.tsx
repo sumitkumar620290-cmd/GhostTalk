@@ -21,7 +21,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
-    const ticker = setInterval(() => setNow(Date.now()), 500);
+    const ticker = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(ticker);
   }, []);
 
@@ -87,7 +87,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
       onSendMessage(inputText.trim());
       setInputText('');
       isAtBottom.current = true;
-      setTimeout(() => scrollToBottom('smooth'), 100);
+      setTimeout(() => scrollToBottom('smooth'), 50);
     }
   };
 
@@ -95,30 +95,27 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
     <div className="flex-1 flex flex-col min-h-0 bg-slate-950 relative overflow-hidden">
       <style>{`
         @keyframes disperse {
-          0% { opacity: 1; transform: scale(1) translateY(0); filter: blur(0px); }
-          100% { opacity: 0; transform: scale(1.15) translateY(-20px); filter: blur(8px); }
+          0% { opacity: 1; transform: scale(1) filter: blur(0px); }
+          100% { opacity: 0; transform: scale(1.05) translateY(-10px); filter: blur(4px); }
         }
         .message-disperse { animation: disperse 1s cubic-bezier(0.4, 0, 0.2, 1) forwards; pointer-events: none; }
       `}</style>
       
-      <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-end pb-32 md:pb-48 opacity-[0.04] select-none z-0">
-        <h2 className="text-[14vw] font-black uppercase tracking-tighter leading-none">GhostTalk</h2>
-        <div className="text-center mt-4">
-          <p className="text-lg md:text-xl font-medium tracking-widest text-white uppercase italic">No identity • No memory • Voices fade</p>
-        </div>
+      <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center opacity-[0.03] select-none z-0">
+        <h2 className="text-[20vw] font-black uppercase tracking-tighter leading-none">Ghost</h2>
       </div>
 
       <div 
         ref={scrollRef} 
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 md:px-12 pt-52 pb-6 md:pt-52 md:pb-10 space-y-6 md:space-y-8 custom-scrollbar z-10 overscroll-contain touch-pan-y"
+        className="flex-1 overflow-y-auto px-3 md:px-6 pt-16 pb-4 md:pt-20 md:pb-6 space-y-1 custom-scrollbar z-10 overscroll-contain touch-pan-y"
       >
         {visibleMessages.length === 0 && (
-          <div className="h-full flex flex-col items-center justify-start pt-20 md:pt-32 space-y-6 opacity-40 select-none text-center">
-            <div className="w-24 h-24 bg-slate-900 rounded-[2rem] flex items-center justify-center text-5xl shadow-2xl border border-white/5">👻</div>
-            <div className="space-y-2">
-              <p className="text-xl font-black uppercase tracking-[0.4em] text-white">Ghost Space</p>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 max-w-[200px] leading-relaxed mx-auto">Temporary conversations. No identity. No memory.</p>
+          <div className="h-full flex flex-col items-center justify-center space-y-4 opacity-30 select-none text-center">
+            <div className="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center text-3xl shadow-xl border border-white/5">👻</div>
+            <div className="space-y-1">
+              <p className="text-sm font-black uppercase tracking-widest text-white">Silence</p>
+              <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Voices fade into the static</p>
             </div>
           </div>
         )}
@@ -133,19 +130,19 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
           return (
             <div 
               key={msg.id} 
-              className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} ${isCompact ? 'mt-1' : 'mt-6'} group ${isExpiring ? 'message-disperse' : ''}`}
+              className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} ${isCompact ? 'mt-0.5' : 'mt-3'} group ${isExpiring ? 'message-disperse' : ''}`}
             >
               {!isCompact && (
-                <div className={`flex items-center space-x-2 mb-2 px-1 ${isOwn ? 'flex-row-reverse space-x-reverse' : ''}`}>
+                <div className={`flex items-center space-x-1.5 mb-0.5 px-1 ${isOwn ? 'flex-row-reverse space-x-reverse' : ''}`}>
                   <button 
                     onClick={() => !isOwn && onUserClick?.(msg.senderId, msg.senderName)}
-                    className={`text-[9px] font-black uppercase tracking-widest ${!isOwn ? 'text-blue-400 underline decoration-blue-500/20' : 'text-slate-600'}`}
+                    className={`text-[10px] font-bold uppercase tracking-wide ${!isOwn ? 'text-blue-400' : 'text-slate-600'}`}
                   >{msg.senderName}</button>
-                  <span className="text-[8px] font-bold text-slate-800">{formatTime(msg.timestamp)}</span>
+                  <span className="text-[9px] font-medium text-slate-700">{formatTime(msg.timestamp)}</span>
                 </div>
               )}
               
-              <div className={`relative max-w-[85%] md:max-w-[70%] p-4 rounded-2xl md:rounded-3xl text-sm md:text-base leading-relaxed ${isOwn ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-slate-900 text-slate-200 rounded-tl-none'}`}>
+              <div className={`relative max-w-[92%] md:max-w-[80%] py-1.5 px-3.5 rounded-xl md:rounded-2xl text-[13px] md:text-sm leading-snug shadow-sm ${isOwn ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-slate-900 text-slate-200 rounded-tl-none'}`}>
                 <div className="whitespace-pre-wrap break-words">{msg.text}</div>
               </div>
             </div>
@@ -153,19 +150,19 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
         })}
       </div>
 
-      <div className="p-3 md:p-5 bg-slate-900/95 backdrop-blur-3xl border-t border-white/5 z-20 shrink-0">
-        <form onSubmit={handleSubmit} className="max-w-4xl mx-auto flex items-center space-x-3">
+      <div className="p-2 md:p-3 bg-slate-900/95 backdrop-blur-3xl border-t border-white/5 z-20 shrink-0">
+        <form onSubmit={handleSubmit} className="max-w-3xl mx-auto flex items-center space-x-2">
           <textarea
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
-            placeholder="Type a disappearing message..."
+            placeholder="Ghost a message..."
             rows={1}
-            className="flex-1 bg-slate-950 border border-white/5 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500/50 text-slate-100 placeholder-slate-700 resize-none"
-            style={{ maxHeight: '120px' }}
+            className="flex-1 bg-slate-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-blue-500/50 text-slate-100 placeholder-slate-700 resize-none"
+            style={{ maxHeight: '100px' }}
           />
-          <button type="submit" disabled={!inputText.trim()} className="bg-blue-600 w-11 h-11 rounded-full flex items-center justify-center shrink-0 disabled:opacity-20 active:scale-90 transition-transform shadow-lg shadow-blue-900/20">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+          <button type="submit" disabled={!inputText.trim()} className="bg-blue-600 w-10 h-10 rounded-xl flex items-center justify-center shrink-0 disabled:opacity-20 active:scale-95 transition-transform shadow-lg shadow-blue-900/20">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
           </button>
         </form>
       </div>
