@@ -513,12 +513,6 @@ const App: React.FC = () => {
                   <span className="text-[10px] font-medium text-slate-400 italic truncate">{sessionTopic}</span>
                 </div>
               )}
-
-              {activeRoomType === RoomType.COMMUNITY && currentStarterPrompt && (
-                <div className="bg-slate-900/40 backdrop-blur-sm px-3 py-1 rounded-full border border-white/5 pointer-events-auto shadow-sm animate-in fade-in duration-1000">
-                  <span className="text-[9px] font-medium text-slate-500 italic leading-none">{currentStarterPrompt}</span>
-                </div>
-              )}
             </div>
 
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden h-full">

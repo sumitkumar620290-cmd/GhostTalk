@@ -1,5 +1,5 @@
 {
-  "name": "AnonChat - Ephemeral Anonymous Messaging",
-  "description": "A privacy-first, ephemeral chat application where identities are random, messages auto-delete after 60 seconds, and private conversations exist only by mutual consent.",
+  "name": "GhostTalk- Ephemeral Anonymous Messaging",
+  "description": "A privacy-first, ephemeral chat application where identities are random, messages auto-delete after 5 minutes, and private conversations exist only by mutual consent.",
   "requestFramePermissions": []
 }
