@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { User, Message, PrivateRoom, ChatRequest, RoomType } from './types';
-import { generateId, generateUsername, generateReconnectCode } from './utils/helpers';
+import { generateId, generateUsername, generateReconnectCode, getWelcomePrompt } from './utils/helpers';
 import SocketService from './services/socketService';
 import ChatBox from './components/ChatBox';
 
@@ -44,6 +44,7 @@ const App: React.FC = () => {
   const [showExtendPopup, setShowExtendPopup] = useState<string | null>(null);
   const [showContactNotice, setShowContactNotice] = useState<string | null>(null);
   const [sessionTopic, setSessionTopic] = useState<string>('');
+  const [currentStarterPrompt, setCurrentStarterPrompt] = useState<string>('');
   
   // Track room IDs that already showed contact notice
   const shownContactNotice = useRef<Set<string>>(new Set());
@@ -113,7 +114,6 @@ const App: React.FC = () => {
         const remaining = room.expiresAt - now;
         
         // Final 5-minute Contact Notice Check
-        // Triggered only in the final 5 minutes of the LAST session (after extension)
         if (room.extended && remaining > 0 && remaining <= 300000 && !shownContactNotice.current.has(room.id)) {
           setShowContactNotice(room.id);
           shownContactNotice.current.add(room.id);
@@ -282,6 +282,8 @@ const App: React.FC = () => {
       if (data.topic) setSessionTopic(data.topic);
       if (data.nextReset) setCommTimerEnd(data.nextReset);
       setMessages(prev => prev.filter(m => m.roomId !== 'community'));
+      // Feature: Reset starter prompt for new session
+      setCurrentStarterPrompt(getWelcomePrompt());
     });
 
     const unsubInit = socket.on<any>('INIT_STATE', (data) => {
@@ -300,20 +302,10 @@ const App: React.FC = () => {
         });
       }
 
-      // Feature: Entry system message - Show only once per session connection
-      const welcomeMsg: Message = {
-        id: 'sys_welcome_' + Math.random().toString(36).substring(7),
-        senderId: 'system',
-        senderName: 'SYSTEM',
-        text: 'Say something you won’t remember tomorrow.',
-        timestamp: Date.now(),
-        roomId: 'community'
-      };
-      setMessages(prev => {
-        // Prevent duplication if INIT_STATE fires multiple times (e.g. reconnection)
-        if (prev.some(m => m.text === welcomeMsg.text && m.senderId === 'system')) return prev;
-        return [...prev, welcomeMsg];
-      });
+      // Feature: Persistent starter prompt (sticky) instead of temporary system message
+      if (!currentStarterPrompt) {
+        setCurrentStarterPrompt(getWelcomePrompt());
+      }
     });
 
     const unsubError = socket.on<ErrorPayload>('ERROR', (data) => {
@@ -331,7 +323,7 @@ const App: React.FC = () => {
     return () => {
       unsubHB(); unsubMsg(); unsubReq(); unsubAccept(); unsubExtended(); unsubClosed(); unsubInit(); unsubError(); unsubResetComm();
     };
-  }, [socket, activeRoomId]);
+  }, [socket, activeRoomId, currentStarterPrompt]);
 
   const activeMessages = useMemo(() => 
     messages.filter(m => m.roomId === activeRoomId && !hiddenUserIds.has(m.senderId)), 
@@ -522,8 +514,14 @@ const App: React.FC = () => {
 
               {sessionTopic && (
                 <div className="bg-slate-900/60 backdrop-blur-md px-4 py-1.5 rounded-full border border-white/5 pointer-events-auto shadow-sm flex items-center space-x-2 animate-in fade-in slide-in-from-top-1 duration-700 max-w-[90%] md:max-w-md">
-                  <span className="text-[8px] font-black uppercase text-blue-500 tracking-widest whitespace-nowrap shrink-0">Today's Session Topic</span>
+                  <span className="text-[8px] font-black uppercase text-blue-500 tracking-widest whitespace-nowrap shrink-0">Session Topic</span>
                   <span className="text-[10px] font-medium text-slate-400 italic truncate">{sessionTopic}</span>
+                </div>
+              )}
+
+              {activeRoomType === RoomType.COMMUNITY && currentStarterPrompt && (
+                <div className="bg-slate-900/40 backdrop-blur-sm px-3 py-1 rounded-full border border-white/5 pointer-events-auto shadow-sm animate-in fade-in duration-1000">
+                  <span className="text-[9px] font-medium text-slate-500 italic leading-none">{currentStarterPrompt}</span>
                 </div>
               )}
             </div>
@@ -562,7 +560,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* FINAL 5-MINUTE CONTACT NOTICE POPUP */}
       {showContactNotice && (
         <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-xl flex items-center justify-center z-[600] p-4" onClick={() => setShowContactNotice(null)}>
           <div className="bg-slate-900 p-8 rounded-[2rem] w-full max-w-[340px] border border-indigo-500/30 shadow-[0_0_50px_rgba(79,70,229,0.2)] animate-in zoom-in-95 text-center" onClick={e => e.stopPropagation()}>
@@ -586,7 +583,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* EXTENSION POPUP (REUSING STYLE) */}
       {showExtendPopup && (
         <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-xl flex items-center justify-center z-[500] p-4" onClick={() => setShowExtendPopup(null)}>
           <div className="bg-slate-900 p-8 rounded-[2rem] w-full max-w-[320px] border border-blue-500/30 shadow-[0_0_50px_rgba(37,99,235,0.2)] animate-in zoom-in-95 text-center" onClick={e => e.stopPropagation()}>
