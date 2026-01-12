@@ -21,6 +21,7 @@ interface ChatRequestPayload {
 
 interface ChatAcceptPayload {
   room: PrivateRoom;
+  messages?: Message[];
 }
 
 interface ChatClosedPayload {
@@ -257,6 +258,16 @@ const App: React.FC = () => {
           next.set(data.room.id, data.room);
           return next;
         });
+        
+        // Restore Private History (Fix 2)
+        if (data.messages) {
+          setMessages(prev => {
+            const existingIds = new Set(prev.map(m => m.id));
+            const newMsgs = data.messages!.filter(m => !existingIds.has(m.id));
+            return [...prev, ...newMsgs];
+          });
+        }
+
         setActiveRoomId(data.room.id);
         setActiveRoomType(RoomType.PRIVATE);
       }

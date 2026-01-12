@@ -20,8 +20,6 @@ const io = new Server(server, {
 
 /**
  * GLOBAL TIME LOGIC (Clock-Aligned)
- * Resets happen at :00 and :30 of every hour for community.
- * Resets happen every 2 hours on the hour for site.
  */
 const getNextBoundary = (minutes) => {
   const ms = minutes * 60 * 1000;
@@ -32,6 +30,7 @@ const getNextBoundary = (minutes) => {
 let users = new Map();
 let communityMessages = []; 
 let privateRooms = new Map(); 
+let privateMessages = new Map(); // roomId -> Array<Message>
 let communityTimerEnd = getNextBoundary(30);
 let siteTimerEnd = getNextBoundary(120);
 let currentTopic = "What is a thought you've never shared out loud?";
@@ -42,7 +41,6 @@ let quietStart = 0;
 let quietEnd = 0;
 
 const calculateQuietMoment = (endTime) => {
-  // Random start time in the final 10 minutes (minutes 20 to 28 of the 30-min session)
   const windowStart = endTime - (10 * 60 * 1000);
   const randomOffset = Math.random() * (8 * 60 * 1000); 
   quietStart = windowStart + randomOffset;
@@ -52,11 +50,8 @@ const calculateQuietMoment = (endTime) => {
 const resetCommunity = async () => {
   communityMessages = [];
   communityTimerEnd = getNextBoundary(30);
-  
-  // Topic Rotation Logic
   sessionStyle = sessionStyle === 'DEEP' ? 'PLAYFUL' : 'DEEP';
   currentTopic = await generateTopic(sessionStyle);
-
   calculateQuietMoment(communityTimerEnd);
 
   io.emit('RESET_COMMUNITY', { 
@@ -64,43 +59,33 @@ const resetCommunity = async () => {
     topic: currentTopic,
     quietMoment: { start: quietStart, end: quietEnd }
   });
-  console.log(`Clock-aligned reset. Next: ${new Date(communityTimerEnd).toLocaleTimeString()}. Topic: ${currentTopic}`);
 };
 
 const resetSite = () => {
   users.clear();
   communityMessages = [];
   privateRooms.clear();
+  privateMessages.clear();
   communityTimerEnd = getNextBoundary(30);
   siteTimerEnd = getNextBoundary(120);
   calculateQuietMoment(communityTimerEnd);
   io.emit('RESET_SITE', { nextReset: siteTimerEnd });
 };
 
-// Initial setup
 calculateQuietMoment(communityTimerEnd);
 generateTopic('DEEP').then(topic => { currentTopic = topic; });
 
-// Main ticker for clock-aligned checks
 setInterval(() => {
   const now = Date.now();
-  
-  // Check for Community Reset
-  if (now >= communityTimerEnd) {
-    resetCommunity();
-  }
+  if (now >= communityTimerEnd) resetCommunity();
+  if (now >= siteTimerEnd) resetSite();
 
-  // Check for Site Reset
-  if (now >= siteTimerEnd) {
-    resetSite();
-  }
-
-  // Cleanup loop
   communityMessages = communityMessages.filter(m => now - m.timestamp < 300000);
   
   for (let [id, room] of privateRooms.entries()) {
     if (now > room.expiresAt) {
       privateRooms.delete(id);
+      privateMessages.delete(id);
       io.emit('CHAT_CLOSED', { roomId: id, reason: 'expired' });
       continue;
     }
@@ -114,6 +99,7 @@ setInterval(() => {
         room.rejoinStartedAt = now;
       } else if (now - room.rejoinStartedAt > 15 * 60 * 1000) {
         privateRooms.delete(id);
+        privateMessages.delete(id);
         io.emit('CHAT_CLOSED', { roomId: id, reason: 'rejoin_expired' });
       }
     } else {
@@ -148,10 +134,8 @@ io.on('connection', (socket) => {
 
   socket.on('MESSAGE', async (data) => {
     if (!data || !data.message || !data.message.text) return;
-
     const now = Date.now();
 
-    // FEATURE 2: RANDOM QUIET MOMENT
     if (data.message.roomId === 'community' && now >= quietStart && now <= quietEnd) {
       const sysMsg = {
         id: 'sys_quiet_' + Math.random().toString(36).substring(7),
@@ -166,17 +150,13 @@ io.on('connection', (socket) => {
     }
 
     const status = await moderate(data.message.text);
-
     if (status === 'BLOCKED') {
       if (data.message.roomId !== 'community') {
         const roomId = data.message.roomId;
         if (privateRooms.has(roomId)) {
           privateRooms.delete(roomId);
-          io.emit('CHAT_CLOSED', { 
-            roomId, 
-            reason: 'moderation',
-            systemMessage: 'This private chat has ended.' 
-          });
+          privateMessages.delete(roomId);
+          io.emit('CHAT_CLOSED', { roomId, reason: 'moderation', systemMessage: 'This private chat has ended.' });
         }
       } else {
         socket.emit('MESSAGE', data); 
@@ -186,10 +166,7 @@ io.on('connection', (socket) => {
 
     if (status === 'BORDERLINE') {
       socket.borderlineCount++;
-      if (socket.borderlineCount > 4) {
-        socket.isShadowLimited = true;
-      }
-
+      if (socket.borderlineCount > 4) socket.isShadowLimited = true;
       if (!socket.hasSeenSoftFirst) {
         const systemMsg = {
           id: 'sys_' + Math.random().toString(36).substring(7),
@@ -212,6 +189,12 @@ io.on('connection', (socket) => {
     if (data.message.roomId === 'community') {
       communityMessages.push(data.message);
       if (communityMessages.length > 200) communityMessages.shift();
+    } else {
+      // Store Private History
+      if (!privateMessages.has(data.message.roomId)) {
+        privateMessages.set(data.message.roomId, []);
+      }
+      privateMessages.get(data.message.roomId).push(data.message);
     }
     io.emit('MESSAGE', data);
   });
@@ -226,12 +209,15 @@ io.on('connection', (socket) => {
         stageDecisions: { '5min': {}, '2min': {} }
     };
     privateRooms.set(room.id, room);
-    io.emit('CHAT_ACCEPT', { ...data, room });
+    // Send history if rejoining or just created (usually empty on create)
+    const history = privateMessages.get(room.id) || [];
+    io.emit('CHAT_ACCEPT', { ...data, room, messages: history });
   });
 
   socket.on('CHAT_EXIT', (data) => {
     if (privateRooms.has(data.roomId)) {
       privateRooms.delete(data.roomId);
+      privateMessages.delete(data.roomId);
       io.emit('CHAT_CLOSED', { roomId: data.roomId, reason: 'exit' });
     }
   });
@@ -246,9 +232,9 @@ io.on('connection', (socket) => {
     
     room.stageDecisions[stage][userId] = decision;
 
-    // We only process if we have both decisions
-    const decisions = Object.values(room.stageDecisions[stage]);
-    if (decisions.length >= 2) {
+    const decisionsEntries = Object.entries(room.stageDecisions[stage]);
+    if (decisionsEntries.length >= 2) {
+      const decisions = decisionsEntries.map(e => e[1]);
       if (decisions.every(d => d === 'EXTEND')) {
         room.extended = true;
         room.expiresAt = Date.now() + 30 * 60 * 1000;
@@ -265,21 +251,26 @@ io.on('connection', (socket) => {
         };
         io.emit('MESSAGE', { message: sysMsg });
       } else {
-        // Find if someone said 'LATER' or 'END'
-        const declined = decisions.find(d => d === 'LATER' || d === 'END');
-        let text = 'Extension declined.';
-        if (declined === 'LATER') text = 'The other person chose to decide later.';
-        if (declined === 'END') text = 'One user chose to end the chat when the timer expires.';
-
-        const sysMsg = {
-          id: 'sys_ext_no_' + Math.random().toString(36).substring(7),
-          senderId: 'system',
-          senderName: 'SYSTEM',
-          text,
-          timestamp: Date.now(),
-          roomId: room.id
-        };
-        io.emit('MESSAGE', { message: sysMsg });
+        // Mixed Decisions Feedback (Fix 4)
+        for (const [uId, d] of decisionsEntries) {
+          const targetSocket = Array.from(users.values()).find(u => u.id === uId)?.socketId;
+          if (targetSocket) {
+            let feedback = "";
+            if (d === 'EXTEND') feedback = "The other person chose to decide later.";
+            else feedback = "You chose to decide later.";
+            
+            io.to(targetSocket).emit('MESSAGE', {
+              message: {
+                id: 'sys_ext_fb_' + Date.now(),
+                senderId: 'system',
+                senderName: 'SYSTEM',
+                text: feedback,
+                timestamp: Date.now(),
+                roomId: roomId
+              }
+            });
+          }
+        }
       }
     }
   });
@@ -287,7 +278,6 @@ io.on('connection', (socket) => {
   socket.on('CHAT_REJOIN', (data) => {
     const currentUser = users.get(socket.id);
     if (!currentUser) return;
-
     let foundRoom = null;
     for (let room of privateRooms.values()) {
       if (room.reconnectCode === data.reconnectCode) {
@@ -295,29 +285,43 @@ io.on('connection', (socket) => {
         break;
       }
     }
-
     if (foundRoom) {
-      if (!foundRoom.participants.includes(currentUser.id)) {
-        foundRoom.participants.push(currentUser.id);
-      }
-      io.emit('CHAT_ACCEPT', { room: foundRoom });
+      if (!foundRoom.participants.includes(currentUser.id)) foundRoom.participants.push(currentUser.id);
+      const history = privateMessages.get(foundRoom.id) || [];
+      io.emit('CHAT_ACCEPT', { room: foundRoom, messages: history });
     } else {
       socket.emit('ERROR', { message: 'Invalid or Expired Secret Key' });
     }
   });
 
   socket.on('disconnect', () => {
+    // Rejoin Timer Notification (Fix 1)
+    const user = users.get(socket.id);
+    if (user) {
+      for (let [roomId, room] of privateRooms.entries()) {
+        if (room.participants.includes(user.id)) {
+          const otherId = room.participants.find(p => p !== user.id);
+          const otherSocketId = Array.from(users.values()).find(u => u.id === otherId)?.socketId;
+          if (otherSocketId) {
+            io.to(otherSocketId).emit('MESSAGE', {
+              message: {
+                id: 'sys_disc_' + Date.now(),
+                senderId: 'system',
+                senderName: 'SYSTEM',
+                text: "Your friend disconnected. They have 15 minutes to rejoin this private chat.",
+                timestamp: Date.now(),
+                roomId: roomId
+              }
+            });
+          }
+        }
+      }
+    }
     users.delete(socket.id);
   });
 });
 
 const distPath = path.join(__dirname, 'dist');
 app.use(express.static(distPath));
-app.get('*', (req, res) => {
-  res.sendFile(path.join(distPath, 'index.html'));
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`GhostTalk Server running on port ${PORT}`);
-});
+app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
+server.listen(process.env.PORT || 3000);

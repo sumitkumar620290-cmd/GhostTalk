@@ -101,8 +101,9 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
         .message-disperse { animation: disperse 1s cubic-bezier(0.4, 0, 0.2, 1) forwards; pointer-events: none; }
       `}</style>
       
-      {/* Task 5: Private Chat Watermark Update */}
+      {/* Watermark Fix (Branding + Ghost Logo/Emoji) - Fix 3 */}
       <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center opacity-[0.12] select-none z-0">
+        <div className="text-5xl md:text-6xl mb-4 grayscale brightness-200">👻</div>
         <h2 className="text-3xl md:text-4xl font-black uppercase tracking-tighter leading-none text-slate-100">Ghost Talk</h2>
         <div className="flex flex-col items-center mt-2 text-center max-w-[80%]">
           {roomType === RoomType.PRIVATE ? (
@@ -126,22 +127,11 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto px-3 md:px-6 pt-24 pb-4 md:pt-32 md:pb-6 space-y-1 custom-scrollbar z-10 overscroll-contain touch-pan-y"
       >
-        {visibleMessages.length === 0 && (
-          <div className="h-full flex flex-col items-center justify-center space-y-4 opacity-30 select-none text-center">
-            <div className="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center text-3xl shadow-xl border border-white/5">👻</div>
-            <div className="space-y-1">
-              <p className="text-sm font-black uppercase tracking-widest text-white">Silence</p>
-              <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Voices fade into the static</p>
-            </div>
-          </div>
-        )}
-
         {visibleMessages.map((msg, idx) => {
           const isOwn = msg.senderId === currentUser.id;
           const prevMsg = visibleMessages[idx - 1];
           const isCompact = prevMsg && prevMsg.senderId === msg.senderId && (msg.timestamp - prevMsg.timestamp < 60000);
           const age = now - msg.timestamp;
-          // Only community messages disperse
           const isExpiring = roomType === RoomType.COMMUNITY && age >= 299000;
 
           return (
@@ -168,7 +158,6 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
         <div className="h-2 w-full shrink-0" />
       </div>
 
-      {/* NEW MESSAGES HELPER BUTTON */}
       {showScrollButton && (
         <button 
           onClick={() => scrollToBottom('smooth')}
