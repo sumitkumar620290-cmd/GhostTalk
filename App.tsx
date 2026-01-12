@@ -273,6 +273,16 @@ const App: React.FC = () => {
       }
     });
 
+    const unsubUpdate = socket.on<any>('ROOM_UPDATE', (data) => {
+      if (data.room) {
+        setPrivateRooms(prev => {
+          const next = new Map(prev);
+          next.set(data.room.id, data.room);
+          return next;
+        });
+      }
+    });
+
     const unsubExtended = socket.on<ChatAcceptPayload>('CHAT_EXTENDED', (data) => {
       if (data.room.participants.includes(currentUserIdRef.current)) {
         setPrivateRooms(prev => {
@@ -347,7 +357,7 @@ const App: React.FC = () => {
     });
 
     return () => {
-      unsubHB(); unsubMsg(); unsubReq(); unsubAccept(); unsubExtended(); unsubClosed(); unsubInit(); unsubError(); unsubResetComm();
+      unsubHB(); unsubMsg(); unsubReq(); unsubAccept(); unsubUpdate(); unsubExtended(); unsubClosed(); unsubInit(); unsubError(); unsubResetComm();
     };
   }, [socket, activeRoomId]);
 
@@ -540,11 +550,19 @@ const App: React.FC = () => {
                 {[...privateRooms.values()].map((room: PrivateRoom) => {
                   const rem = Math.max(0, room.expiresAt - currentTime);
                   const timeStr = `${Math.floor(rem / 60000)}:${Math.floor((rem % 60000) / 1000).toString().padStart(2, '0')}`;
+                  
+                  // Rejoin countdown visibility - Capped by the main timer (Fix 3)
+                  const rejoinDeadline = room.rejoinStartedAt ? Math.min(room.rejoinStartedAt + 900000, room.expiresAt) : 0;
+                  const rejoinRem = rejoinDeadline > 0 ? Math.max(0, rejoinDeadline - currentTime) : 0;
+                  const rejoinStr = rejoinRem > 0 
+                    ? ` [Rejoin: ${Math.floor(rejoinRem / 60000)}:${Math.floor((rejoinRem % 60000) / 1000).toString().padStart(2, '0')}]` 
+                    : '';
+
                   return (
                     <div key={room.id} className="flex ml-1 items-stretch">
                       <button onClick={() => { setActiveRoomId(room.id); setActiveRoomType(RoomType.PRIVATE); }} className={`px-4 py-1.5 rounded-l-lg flex items-center space-x-2 transition-all ${activeRoomId === room.id ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-500'}`}>
                         <span className="text-[9px] font-black uppercase">Secret</span>
-                        <span className="text-[8px] font-bold opacity-70">{timeStr}</span>
+                        <span className="text-[8px] font-bold opacity-70">{timeStr}{rejoinStr}</span>
                       </button>
                       <button onClick={(e) => { e.stopPropagation(); exitPrivateRoom(room.id); }} className={`px-2 flex items-center justify-center rounded-r-lg transition-all border-l border-white/10 hover:bg-red-500/30 ${activeRoomId === room.id ? 'bg-indigo-700 text-white' : 'bg-slate-900 text-slate-600'}`}>✕</button>
                     </div>

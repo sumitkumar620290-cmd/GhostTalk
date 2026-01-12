@@ -83,7 +83,8 @@ setInterval(() => {
   communityMessages = communityMessages.filter(m => now - m.timestamp < 300000);
   
   for (let [id, room] of privateRooms.entries()) {
-    if (now > room.expiresAt) {
+    // 1. Absolute Main Timer Priority
+    if (now >= room.expiresAt) {
       privateRooms.delete(id);
       privateMessages.delete(id);
       io.emit('CHAT_CLOSED', { roomId: id, reason: 'expired' });
@@ -94,10 +95,17 @@ setInterval(() => {
       .filter(u => room.participants.includes(u.id))
       .length;
 
+    // 2. Rejoin Window Logic with Absolute Capping
     if (activeParticipantsCount < 2) {
       if (!room.rejoinStartedAt) {
         room.rejoinStartedAt = now;
-      } else if (now - room.rejoinStartedAt > 15 * 60 * 1000) {
+      }
+      
+      const rejoinLimit = room.rejoinStartedAt + (15 * 60 * 1000);
+      // Rejoin window cannot exceed the session expiry time
+      const effectiveDeadline = Math.min(rejoinLimit, room.expiresAt);
+
+      if (now >= effectiveDeadline) {
         privateRooms.delete(id);
         privateMessages.delete(id);
         io.emit('CHAT_CLOSED', { roomId: id, reason: 'rejoin_expired' });
@@ -287,6 +295,22 @@ io.on('connection', (socket) => {
     }
     if (foundRoom) {
       if (!foundRoom.participants.includes(currentUser.id)) foundRoom.participants.push(currentUser.id);
+      
+      // FIX REJOIN NOTIFICATION
+      if (foundRoom.rejoinStartedAt) {
+        foundRoom.rejoinStartedAt = null;
+        io.emit('MESSAGE', {
+          message: {
+            id: 'sys_rej_' + Date.now(),
+            senderId: 'system',
+            senderName: 'SYSTEM',
+            text: "Your friend rejoined the chat.",
+            timestamp: Date.now(),
+            roomId: foundRoom.id
+          }
+        });
+      }
+
       const history = privateMessages.get(foundRoom.id) || [];
       io.emit('CHAT_ACCEPT', { room: foundRoom, messages: history });
     } else {
@@ -300,6 +324,12 @@ io.on('connection', (socket) => {
     if (user) {
       for (let [roomId, room] of privateRooms.entries()) {
         if (room.participants.includes(user.id)) {
+          // FRESH rejoin timer immediately
+          room.rejoinStartedAt = Date.now();
+          
+          // Broadcast room update so remaining user sees countdown
+          io.emit('ROOM_UPDATE', { room });
+          
           const otherId = room.participants.find(p => p !== user.id);
           const otherSocketId = Array.from(users.values()).find(u => u.id === otherId)?.socketId;
           if (otherSocketId) {
