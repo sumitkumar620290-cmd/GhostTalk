@@ -391,6 +391,13 @@ const App: React.FC = () => {
         {activePrivateRoom && (
           <>
             <div>
+              <h4 className="text-[9px] font-black uppercase text-indigo-500 tracking-widest mb-3">Secret Restore Key</h4>
+              <div className="bg-indigo-900/20 p-3 rounded-lg border border-indigo-500/20">
+                <p className="text-[9px] text-indigo-400 uppercase font-black mb-0.5">Restore Code</p>
+                <p className="text-xs font-mono font-bold text-white tracking-widest">{activePrivateRoom.reconnectCode}</p>
+              </div>
+            </div>
+            <div>
               <h4 className="text-[9px] font-black uppercase text-indigo-500 tracking-widest mb-3">PRIVATE CHAT GUIDELINES</h4>
               <ul className="text-[10px] text-slate-400 space-y-2 font-medium">
                 <li>• Private chat starts only with mutual consent.</li>
@@ -408,19 +415,21 @@ const App: React.FC = () => {
           </>
         )}
 
-        <div>
-          <h4 className="text-[9px] font-black uppercase text-slate-500 tracking-widest mb-2">GLOBAL / COMMUNITY GUIDELINES</h4>
-          <ul className="text-[10px] text-slate-400 space-y-2 font-medium">
-            <li>• No login. Fully anonymous.</li>
-            <li>• Be respectful to other ghosts.</li>
-            <li>• No spamming or flooding messages.</li>
-            <li>• No harassment, threats, or intimidation.</li>
-            <li>• No illegal or harmful activities of any kind.</li>
-            <li>• Do not share personal or identifiable information publicly.</li>
-            <li>• Conversations must remain consensual and lawful.</li>
-            <li>• Community safety comes first.</li>
-          </ul>
-        </div>
+        {activeRoomType === RoomType.COMMUNITY && (
+          <div>
+            <h4 className="text-[9px] font-black uppercase text-slate-500 tracking-widest mb-2">GLOBAL / COMMUNITY GUIDELINES</h4>
+            <ul className="text-[10px] text-slate-400 space-y-2 font-medium">
+              <li>• No login. Fully anonymous.</li>
+              <li>• Be respectful to other ghosts.</li>
+              <li>• No spamming or flooding messages.</li>
+              <li>• No harassment, threats, or intimidation.</li>
+              <li>• No illegal or harmful activities of any kind.</li>
+              <li>• Do not share personal or identifiable information publicly.</li>
+              <li>• Conversations must remain consensual and lawful.</li>
+              <li>• Community safety comes first.</li>
+            </ul>
+          </div>
+        )}
 
         <div className="bg-red-950/20 border border-red-500/20 p-3 rounded-lg mb-4">
           <h4 className="text-[9px] font-black uppercase text-red-500 tracking-widest mb-2">18+ NOTICE</h4>
