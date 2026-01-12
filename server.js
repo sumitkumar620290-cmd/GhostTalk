@@ -1,8 +1,13 @@
 
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const path = require('path');
+import express from 'express';
+import http from 'http';
+import { Server } from 'socket.io';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { moderate, generateTopic } from './moderation.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
@@ -13,55 +18,122 @@ const io = new Server(server, {
   }
 });
 
+/**
+ * GLOBAL TIME LOGIC (Clock-Aligned)
+ * Resets happen at :00 and :30 of every hour for community.
+ * Resets happen every 2 hours on the hour for site.
+ */
+const getNextBoundary = (minutes) => {
+  const ms = minutes * 60 * 1000;
+  return Math.ceil(Date.now() / ms) * ms;
+};
+
 // In-memory state
 let users = new Map();
 let communityMessages = []; 
-let privateRooms = new Map(); // Store active private sessions
-let communityTimerEnd = Date.now() + 30 * 60 * 1000;
-let siteTimerEnd = Date.now() + 120 * 60 * 1000;
+let privateRooms = new Map(); 
+let communityTimerEnd = getNextBoundary(30);
+let siteTimerEnd = getNextBoundary(120);
+let currentTopic = "What is a thought you've never shared out loud?";
+let sessionStyle = 'DEEP'; 
 
-const resetCommunity = () => {
+// Quiet Moment state
+let quietStart = 0;
+let quietEnd = 0;
+
+const calculateQuietMoment = (endTime) => {
+  // Random start time in the final 10 minutes (minutes 20 to 28 of the 30-min session)
+  const windowStart = endTime - (10 * 60 * 1000);
+  const randomOffset = Math.random() * (8 * 60 * 1000); 
+  quietStart = windowStart + randomOffset;
+  quietEnd = quietStart + (2 * 60 * 1000);
+};
+
+const resetCommunity = async () => {
   communityMessages = [];
-  communityTimerEnd = Date.now() + 30 * 60 * 1000;
-  io.emit('RESET_COMMUNITY', { nextReset: communityTimerEnd });
-  console.log('Community reset triggered');
+  communityTimerEnd = getNextBoundary(30);
+  
+  // Topic Rotation Logic
+  sessionStyle = sessionStyle === 'DEEP' ? 'PLAYFUL' : 'DEEP';
+  currentTopic = await generateTopic(sessionStyle);
+
+  calculateQuietMoment(communityTimerEnd);
+
+  io.emit('RESET_COMMUNITY', { 
+    nextReset: communityTimerEnd,
+    topic: currentTopic,
+    quietMoment: { start: quietStart, end: quietEnd }
+  });
+  console.log(`Clock-aligned reset. Next: ${new Date(communityTimerEnd).toLocaleTimeString()}. Topic: ${currentTopic}`);
 };
 
 const resetSite = () => {
   users.clear();
   communityMessages = [];
   privateRooms.clear();
-  communityTimerEnd = Date.now() + 30 * 60 * 1000;
-  siteTimerEnd = Date.now() + 120 * 60 * 1000;
+  communityTimerEnd = getNextBoundary(30);
+  siteTimerEnd = getNextBoundary(120);
+  calculateQuietMoment(communityTimerEnd);
   io.emit('RESET_SITE', { nextReset: siteTimerEnd });
-  console.log('Site reset triggered');
 };
 
-setInterval(resetCommunity, 30 * 60 * 1000);
-setInterval(resetSite, 120 * 60 * 1000);
+// Initial setup
+calculateQuietMoment(communityTimerEnd);
+generateTopic('DEEP').then(topic => { currentTopic = topic; });
 
+// Main ticker for clock-aligned checks
 setInterval(() => {
   const now = Date.now();
+  
+  // Check for Community Reset
+  if (now >= communityTimerEnd) {
+    resetCommunity();
+  }
+
+  // Check for Site Reset
+  if (now >= siteTimerEnd) {
+    resetSite();
+  }
+
+  // Cleanup loop
   communityMessages = communityMessages.filter(m => now - m.timestamp < 300000);
   
   for (let [id, room] of privateRooms.entries()) {
     if (now > room.expiresAt) {
       privateRooms.delete(id);
       io.emit('CHAT_CLOSED', { roomId: id, reason: 'expired' });
-      console.log(`Private room ${id} expired.`);
+      continue;
+    }
+
+    const activeParticipantsCount = Array.from(users.values())
+      .filter(u => room.participants.includes(u.id))
+      .length;
+
+    if (activeParticipantsCount < 2) {
+      if (!room.rejoinStartedAt) {
+        room.rejoinStartedAt = now;
+      } else if (now - room.rejoinStartedAt > 15 * 60 * 1000) {
+        privateRooms.delete(id);
+        io.emit('CHAT_CLOSED', { roomId: id, reason: 'rejoin_expired' });
+      }
+    } else {
+      room.rejoinStartedAt = null;
     }
   }
-}, 5000);
+}, 1000);
 
 io.on('connection', (socket) => {
-  console.log('User connected:', socket.id);
+  socket.hasSeenSoftFirst = false;
+  socket.borderlineCount = 0;
+  socket.isShadowLimited = false;
 
-  // Send current state including the list of currently active users
   socket.emit('INIT_STATE', {
     communityMessages,
     communityTimerEnd,
     siteTimerEnd,
-    onlineUsers: Array.from(users.values())
+    onlineUsers: Array.from(users.values()),
+    currentTopic,
+    quietMoment: { start: quietStart, end: quietEnd }
   });
 
   socket.on('HEARTBEAT', (data) => {
@@ -74,7 +146,69 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('MESSAGE', (data) => {
+  socket.on('MESSAGE', async (data) => {
+    if (!data || !data.message || !data.message.text) return;
+
+    const now = Date.now();
+
+    // FEATURE 2: RANDOM QUIET MOMENT
+    if (data.message.roomId === 'community' && now >= quietStart && now <= quietEnd) {
+      const sysMsg = {
+        id: 'sys_quiet_' + Math.random().toString(36).substring(7),
+        senderId: 'system',
+        senderName: 'SYSTEM',
+        text: 'Quiet moment. Just read.',
+        timestamp: now,
+        roomId: 'community'
+      };
+      socket.emit('MESSAGE', { message: sysMsg });
+      return;
+    }
+
+    const status = await moderate(data.message.text);
+
+    if (status === 'BLOCKED') {
+      if (data.message.roomId !== 'community') {
+        const roomId = data.message.roomId;
+        if (privateRooms.has(roomId)) {
+          privateRooms.delete(roomId);
+          io.emit('CHAT_CLOSED', { 
+            roomId, 
+            reason: 'moderation',
+            systemMessage: 'This private chat has ended.' 
+          });
+        }
+      } else {
+        socket.emit('MESSAGE', data); 
+      }
+      return;
+    }
+
+    if (status === 'BORDERLINE') {
+      socket.borderlineCount++;
+      if (socket.borderlineCount > 4) {
+        socket.isShadowLimited = true;
+      }
+
+      if (!socket.hasSeenSoftFirst) {
+        const systemMsg = {
+          id: 'sys_' + Math.random().toString(36).substring(7),
+          senderId: 'system',
+          senderName: 'SYSTEM',
+          text: 'Let’s keep Ghost Talk safe for everyone.',
+          timestamp: Date.now(),
+          roomId: data.message.roomId
+        };
+        socket.emit('MESSAGE', { message: systemMsg });
+        socket.hasSeenSoftFirst = true;
+      }
+    }
+
+    if (socket.isShadowLimited) {
+      socket.emit('MESSAGE', data);
+      return;
+    }
+
     if (data.message.roomId === 'community') {
       communityMessages.push(data.message);
       if (communityMessages.length > 200) communityMessages.shift();
@@ -83,12 +217,10 @@ io.on('connection', (socket) => {
   });
 
   socket.on('CHAT_REQUEST', (data) => {
-    console.log(`Chat request from ${data.request.fromName} to ${data.request.toId}`);
     socket.broadcast.emit('CHAT_REQUEST', data);
   });
 
   socket.on('CHAT_ACCEPT', (data) => {
-    console.log(`Chat accepted for room ${data.room.id}`);
     privateRooms.set(data.room.id, data.room);
     io.emit('CHAT_ACCEPT', data);
   });
@@ -97,7 +229,6 @@ io.on('connection', (socket) => {
     if (privateRooms.has(data.roomId)) {
       privateRooms.delete(data.roomId);
       io.emit('CHAT_CLOSED', { roomId: data.roomId, reason: 'exit' });
-      console.log(`Private room ${data.roomId} closed by user.`);
     }
   });
 
@@ -108,16 +239,12 @@ io.on('connection', (socket) => {
       room.expiresAt = Date.now() + 30 * 60 * 1000;
       privateRooms.set(room.id, room);
       io.emit('CHAT_EXTENDED', { room });
-      console.log(`Private room ${room.id} extended.`);
     }
   });
 
   socket.on('CHAT_REJOIN', (data) => {
     const currentUser = users.get(socket.id);
-    if (!currentUser) {
-      socket.emit('ERROR', { message: 'Connection issue. Please wait.' });
-      return;
-    }
+    if (!currentUser) return;
 
     let foundRoom = null;
     for (let room of privateRooms.values()) {
@@ -128,20 +255,16 @@ io.on('connection', (socket) => {
     }
 
     if (foundRoom) {
-      // Add the new user ID to participants list so client-side check passes
       if (!foundRoom.participants.includes(currentUser.id)) {
         foundRoom.participants.push(currentUser.id);
       }
-      // Broadcast update to EVERYONE so the original partner also gets the new ID list
       io.emit('CHAT_ACCEPT', { room: foundRoom });
-      console.log(`User ${currentUser.username} restored session via key: ${data.reconnectCode}`);
     } else {
       socket.emit('ERROR', { message: 'Invalid or Expired Secret Key' });
     }
   });
 
   socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
     users.delete(socket.id);
   });
 });

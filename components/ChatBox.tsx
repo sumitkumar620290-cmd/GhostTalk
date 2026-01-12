@@ -17,15 +17,15 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
   const [inputText, setInputText] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const isAtBottom = useRef(true);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const lastSeenMessageId = useRef<string | null>(null);
   const [now, setNow] = useState(Date.now());
 
-  // Clock to trigger re-renders for the 5-minute fading/expiry
   useEffect(() => {
     const ticker = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(ticker);
   }, []);
 
-  // Filter messages to show only those sent within the last 5 minutes
   const visibleMessages = messages.filter(m => now - m.timestamp < 300000);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -34,27 +34,43 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
         top: scrollRef.current.scrollHeight,
         behavior
       });
+      setShowScrollButton(false);
+      isAtBottom.current = true;
     }
   }, []);
 
   const handleScroll = () => {
     if (scrollRef.current) {
       const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-      // Using a tighter threshold for better UX: if within 100px of bottom, consider "at bottom"
-      isAtBottom.current = scrollHeight - scrollTop - clientHeight < 100;
+      // If within 100px of bottom, consider "at bottom"
+      const nearBottom = scrollHeight - scrollTop - clientHeight < 100;
+      isAtBottom.current = nearBottom;
+      
+      if (nearBottom) {
+        setShowScrollButton(false);
+        if (visibleMessages.length > 0) {
+          lastSeenMessageId.current = visibleMessages[visibleMessages.length - 1].id;
+        }
+      }
     }
   };
 
-  // Only trigger auto-scroll when a NEW message arrives at the bottom
-  const lastMessageId = visibleMessages.length > 0 ? visibleMessages[visibleMessages.length - 1].id : null;
+  const currentLastMessageId = visibleMessages.length > 0 ? visibleMessages[visibleMessages.length - 1].id : null;
   
   useEffect(() => {
-    if (isAtBottom.current && lastMessageId) {
-      scrollToBottom('smooth');
+    if (currentLastMessageId) {
+      if (isAtBottom.current) {
+        scrollToBottom('smooth');
+        lastSeenMessageId.current = currentLastMessageId;
+      } else {
+        // Only show button if a NEW message has arrived since we were last at the bottom
+        if (currentLastMessageId !== lastSeenMessageId.current) {
+          setShowScrollButton(true);
+        }
+      }
     }
-  }, [lastMessageId, scrollToBottom]);
+  }, [currentLastMessageId, scrollToBottom]);
 
-  // Maintain scroll on resize (mobile keyboard)
   useEffect(() => {
     const handleResize = () => {
       if (isAtBottom.current) scrollToBottom('auto');
@@ -69,7 +85,6 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
     if (text) {
       onSendMessage(text);
       setInputText('');
-      // Force "at bottom" to true so we scroll to our own new message
       isAtBottom.current = true;
       setTimeout(() => scrollToBottom('smooth'), 50);
     }
@@ -85,7 +100,6 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
         .message-disperse { animation: disperse 1s cubic-bezier(0.4, 0, 0.2, 1) forwards; pointer-events: none; }
       `}</style>
       
-      {/* WATERMARK BRANDING - Brightness increased for better visibility */}
       <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center opacity-[0.12] select-none z-0">
         <h2 className="text-3xl md:text-4xl font-black uppercase tracking-tighter leading-none text-slate-100">Ghost Talk</h2>
         <div className="flex flex-col items-center mt-2 text-center">
@@ -94,7 +108,6 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
         </div>
       </div>
 
-      {/* MESSAGES AREA */}
       <div 
         ref={scrollRef} 
         onScroll={handleScroll}
@@ -141,7 +154,16 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
         <div className="h-2 w-full shrink-0" />
       </div>
 
-      {/* INPUT AREA */}
+      {/* NEW MESSAGES HELPER BUTTON */}
+      {showScrollButton && (
+        <button 
+          onClick={() => scrollToBottom('smooth')}
+          className="absolute bottom-20 left-1/2 -translate-x-1/2 z-[30] px-4 py-2 bg-slate-900/90 text-blue-400 border border-blue-500/20 text-[9px] font-black uppercase tracking-widest rounded-full shadow-2xl backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 transition-all active:scale-95"
+        >
+          ↓ New messages
+        </button>
+      )}
+
       <div className="p-2 md:p-3 bg-slate-900/95 backdrop-blur-3xl border-t border-white/5 z-20 shrink-0">
         <form onSubmit={handleSubmit} className="max-w-3xl mx-auto flex items-center space-x-2">
           <textarea

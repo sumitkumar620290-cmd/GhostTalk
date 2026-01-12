@@ -26,6 +26,7 @@ interface ChatAcceptPayload {
 interface ChatClosedPayload {
   roomId: string;
   reason: string;
+  systemMessage?: string;
 }
 
 interface ErrorPayload {
@@ -41,6 +42,11 @@ const App: React.FC = () => {
   const [showPeersMenu, setShowPeersMenu] = useState(false);
   const [currentTime, setCurrentTime] = useState(Date.now());
   const [showExtendPopup, setShowExtendPopup] = useState<string | null>(null);
+  const [showContactNotice, setShowContactNotice] = useState<string | null>(null);
+  const [sessionTopic, setSessionTopic] = useState<string>('');
+  
+  // Track room IDs that already showed contact notice
+  const shownContactNotice = useRef<Set<string>>(new Set());
   
   const [currentUser] = useState<User>(() => ({
     id: generateId(),
@@ -105,6 +111,15 @@ const App: React.FC = () => {
 
       privateRooms.forEach(room => {
         const remaining = room.expiresAt - now;
+        
+        // Final 5-minute Contact Notice Check
+        // Triggered only in the final 5 minutes of the LAST session (after extension)
+        if (room.extended && remaining > 0 && remaining <= 300000 && !shownContactNotice.current.has(room.id)) {
+          setShowContactNotice(room.id);
+          shownContactNotice.current.add(room.id);
+        }
+
+        // Extension Popup Check
         if (remaining > 0 && remaining <= 300000 && !room.extended && showExtendPopup !== room.id) {
           setShowExtendPopup(room.id);
         } else if (remaining <= 0) {
@@ -244,15 +259,35 @@ const App: React.FC = () => {
         next.delete(data.roomId);
         return next;
       });
+      
       if (activeRoomId === data.roomId) {
         setActiveRoomId('community');
         setActiveRoomType(RoomType.COMMUNITY);
       }
+
+      if (data.systemMessage) {
+        const sysMsg: Message = {
+          id: 'sys_' + Math.random().toString(36).substring(7),
+          senderId: 'system',
+          senderName: 'SYSTEM',
+          text: data.systemMessage,
+          timestamp: Date.now(),
+          roomId: 'community'
+        };
+        setMessages(prev => [...prev, sysMsg]);
+      }
+    });
+
+    const unsubResetComm = socket.on<any>('RESET_COMMUNITY', (data) => {
+      if (data.topic) setSessionTopic(data.topic);
+      if (data.nextReset) setCommTimerEnd(data.nextReset);
+      setMessages(prev => prev.filter(m => m.roomId !== 'community'));
     });
 
     const unsubInit = socket.on<any>('INIT_STATE', (data) => {
       if (data.communityMessages) setMessages(data.communityMessages);
       if (data.communityTimerEnd) setCommTimerEnd(data.communityTimerEnd);
+      if (data.currentTopic) setSessionTopic(data.currentTopic);
       if (data.onlineUsers) {
         setOnlineUsers(prev => {
           const next = new Map(prev);
@@ -264,14 +299,37 @@ const App: React.FC = () => {
           return next;
         });
       }
+
+      // Feature: Entry system message - Show only once per session connection
+      const welcomeMsg: Message = {
+        id: 'sys_welcome_' + Math.random().toString(36).substring(7),
+        senderId: 'system',
+        senderName: 'SYSTEM',
+        text: 'Say something you won’t remember tomorrow.',
+        timestamp: Date.now(),
+        roomId: 'community'
+      };
+      setMessages(prev => {
+        // Prevent duplication if INIT_STATE fires multiple times (e.g. reconnection)
+        if (prev.some(m => m.text === welcomeMsg.text && m.senderId === 'system')) return prev;
+        return [...prev, welcomeMsg];
+      });
     });
 
     const unsubError = socket.on<ErrorPayload>('ERROR', (data) => {
-      alert(data.message);
+      const sysMsg: Message = {
+        id: 'sys_' + Math.random().toString(36).substring(7),
+        senderId: 'system',
+        senderName: 'SYSTEM',
+        text: data.message,
+        timestamp: Date.now(),
+        roomId: activeRoomId
+      };
+      setMessages(prev => [...prev, sysMsg]);
     });
 
     return () => {
-      unsubHB(); unsubMsg(); unsubReq(); unsubAccept(); unsubExtended(); unsubClosed(); unsubInit(); unsubError();
+      unsubHB(); unsubMsg(); unsubReq(); unsubAccept(); unsubExtended(); unsubClosed(); unsubInit(); unsubError(); unsubResetComm();
     };
   }, [socket, activeRoomId]);
 
@@ -304,8 +362,6 @@ const App: React.FC = () => {
   const activeRoomTimeLeft = activePrivateRoom ? Math.max(0, activePrivateRoom.expiresAt - currentTime) : 0;
   const isFinalFive = activePrivateRoom && activePrivateRoom.extended && activeRoomTimeLeft <= 300000;
 
-  // Inlining the sidebar content directly into the main render ensures 
-  // the DOM nodes are stable and scroll position is not reset every second.
   const renderSidebarInner = () => (
     <div className="flex flex-col h-full w-full overflow-hidden">
       <div className="shrink-0 mb-6">
@@ -443,7 +499,7 @@ const App: React.FC = () => {
 
         <main className="flex-1 flex overflow-hidden relative">
           <div className="flex-1 flex flex-col bg-slate-950 overflow-hidden h-full">
-            <div className="absolute top-2 left-0 right-0 z-30 flex justify-center pointer-events-none">
+            <div className="absolute top-2 left-0 right-0 z-30 flex flex-col items-center pointer-events-none space-y-2">
               <div className="flex bg-slate-900/80 backdrop-blur-xl p-1 rounded-xl border border-white/10 pointer-events-auto shadow-xl">
                 <button onClick={() => { setActiveRoomId('community'); setActiveRoomType(RoomType.COMMUNITY); }} className={`px-4 py-1.5 rounded-lg flex items-center space-x-2 transition-all ${activeRoomType === RoomType.COMMUNITY ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>
                   <span className="text-[9px] font-black uppercase tracking-widest">Global</span>
@@ -463,6 +519,13 @@ const App: React.FC = () => {
                   );
                 })}
               </div>
+
+              {sessionTopic && (
+                <div className="bg-slate-900/60 backdrop-blur-md px-4 py-1.5 rounded-full border border-white/5 pointer-events-auto shadow-sm flex items-center space-x-2 animate-in fade-in slide-in-from-top-1 duration-700 max-w-[90%] md:max-w-md">
+                  <span className="text-[8px] font-black uppercase text-blue-500 tracking-widest whitespace-nowrap shrink-0">Today's Session Topic</span>
+                  <span className="text-[10px] font-medium text-slate-400 italic truncate">{sessionTopic}</span>
+                </div>
+              )}
             </div>
 
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden h-full">
@@ -495,6 +558,47 @@ const App: React.FC = () => {
             <h3 className="text-lg font-black text-white text-center uppercase mb-6">Restore Key</h3>
             <input type="text" maxLength={6} value={reconnectInput} onChange={(e) => setReconnectInput(e.target.value.toUpperCase())} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-2xl text-center font-mono font-black text-blue-400 mb-6 outline-none focus:border-blue-500/50" placeholder="••••••" />
             <button onClick={() => { socket.emit({ type: 'CHAT_REJOIN', reconnectCode: reconnectInput }); setShowReconnectModal(false); }} className="w-full py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-[10px] tracking-widest">Link Channel</button>
+          </div>
+        </div>
+      )}
+
+      {/* FINAL 5-MINUTE CONTACT NOTICE POPUP */}
+      {showContactNotice && (
+        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-xl flex items-center justify-center z-[600] p-4" onClick={() => setShowContactNotice(null)}>
+          <div className="bg-slate-900 p-8 rounded-[2rem] w-full max-w-[340px] border border-indigo-500/30 shadow-[0_0_50px_rgba(79,70,229,0.2)] animate-in zoom-in-95 text-center" onClick={e => e.stopPropagation()}>
+            <div className="w-16 h-16 bg-indigo-500/10 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-indigo-500/20">
+              <span className="text-2xl">📱</span>
+            </div>
+            <h3 className="text-lg font-black text-white uppercase mb-4 tracking-tight">Final Minutes</h3>
+            <div className="text-slate-400 text-[11px] font-medium leading-relaxed mb-8 whitespace-pre-wrap">
+              This private chat will end soon.{"\n"}{"\n"}
+              If you choose, you may share contact details{"\n"}
+              (Instagram, Snapchat, etc.){"\n"}{"\n"}
+              Ghost Talk does not encourage or store this information.
+            </div>
+            <button 
+              onClick={() => setShowContactNotice(null)} 
+              className="w-full py-4 bg-indigo-600 text-white rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg shadow-indigo-900/20"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* EXTENSION POPUP (REUSING STYLE) */}
+      {showExtendPopup && (
+        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-xl flex items-center justify-center z-[500] p-4" onClick={() => setShowExtendPopup(null)}>
+          <div className="bg-slate-900 p-8 rounded-[2rem] w-full max-w-[320px] border border-blue-500/30 shadow-[0_0_50px_rgba(37,99,235,0.2)] animate-in zoom-in-95 text-center" onClick={e => e.stopPropagation()}>
+            <div className="w-16 h-16 bg-blue-600/10 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-blue-600/20">
+              <span className="text-2xl">⏳</span>
+            </div>
+            <h3 className="text-lg font-black text-white uppercase mb-4 tracking-tight">Time Fading</h3>
+            <p className="text-slate-400 text-xs font-medium leading-relaxed mb-8">This session expires in 5 minutes. Would you like to extend for 30 more?</p>
+            <div className="space-y-3">
+              <button onClick={() => extendPrivateRoom(showExtendPopup!)} className="w-full py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg shadow-blue-900/20">Extend Session</button>
+              <button onClick={() => setShowExtendPopup(null)} className="w-full py-3 text-slate-500 font-bold uppercase text-[9px] tracking-widest">Maybe Later</button>
+            </div>
           </div>
         </div>
       )}

@@ -23,6 +23,7 @@ export interface PrivateRoom {
   createdAt: number;
   expiresAt: number;
   extended?: boolean; // Track if the 30min extension has been used
+  rejoinStartedAt?: number | null; // Track when the 15-min rejoin window begins
 }
 
 export interface ChatRequest {
