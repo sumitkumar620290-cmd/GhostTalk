@@ -152,6 +152,7 @@ const App: React.FC = () => {
             setActiveRoomId('community');
             setActiveRoomType(RoomType.COMMUNITY);
           }
+          localStorage.removeItem(`ghost_token_${room.reconnectCode}`);
         }
       });
     }, 1000);
@@ -212,6 +213,10 @@ const App: React.FC = () => {
   };
 
   const exitPrivateRoom = (roomId: string) => {
+    const room = privateRooms.get(roomId);
+    if (room) {
+        localStorage.removeItem(`ghost_token_${room.reconnectCode}`);
+    }
     socket.emit({ type: 'CHAT_EXIT', roomId });
   };
 
@@ -287,6 +292,14 @@ const App: React.FC = () => {
 
     const unsubAccept = socket.on<ChatAcceptPayload>('CHAT_ACCEPT', (data) => {
       if (data.room.participants.includes(currentUserIdRef.current)) {
+        // Securely store personal session token for rejoin
+        if (data.room.participantTokens && data.room.reconnectCode) {
+            const myToken = data.room.participantTokens[currentUserIdRef.current];
+            if (myToken) {
+                localStorage.setItem(`ghost_token_${data.room.reconnectCode}`, myToken);
+            }
+        }
+
         setPrivateRooms(prev => {
           const next = new Map(prev);
           next.set(data.room.id, data.room);
@@ -328,6 +341,11 @@ const App: React.FC = () => {
     });
 
     const unsubClosed = socket.on<ChatClosedPayload>('CHAT_CLOSED', (data) => {
+      const room = privateRooms.get(data.roomId);
+      if (room) {
+          localStorage.removeItem(`ghost_token_${room.reconnectCode}`);
+      }
+
       setPrivateRooms(prev => {
         const next = new Map(prev);
         next.delete(data.roomId);
@@ -395,7 +413,7 @@ const App: React.FC = () => {
     return () => {
       unsubHB(); unsubMsg(); unsubReq(); unsubAccept(); unsubUpdate(); unsubExtended(); unsubClosed(); unsubInit(); unsubError(); unsubResetComm(); unsubFeedback();
     };
-  }, [socket, activeRoomId]);
+  }, [socket, activeRoomId, privateRooms]);
 
   const activeMessages = useMemo(() => 
     messages.filter(m => m.roomId === activeRoomId && !hiddenUserIds.has(m.senderId)), 
@@ -428,7 +446,6 @@ const App: React.FC = () => {
 
   const renderSidebarInner = () => (
     <div className="flex flex-col h-full w-full overflow-hidden">
-      {/* Task 4: Simplified Identity Header */}
       <div className="shrink-0 mb-6 flex items-center space-x-3">
         <div className="w-10 h-10 bg-blue-600/10 rounded-xl flex items-center justify-center border border-blue-600/20 shadow-xl">
           <span className="text-xl">👻</span>
@@ -638,7 +655,11 @@ const App: React.FC = () => {
           <div className="bg-slate-900 p-8 rounded-[2rem] w-full max-w-[320px] border border-white/5 animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-black text-white text-center uppercase mb-6">Restore Key</h3>
             <input type="text" maxLength={6} value={reconnectInput} onChange={(e) => setReconnectInput(e.target.value.toUpperCase())} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-2xl text-center font-mono font-black text-blue-400 mb-6 outline-none focus:border-blue-500/50" placeholder="••••••" />
-            <button onClick={() => { socket.emit({ type: 'CHAT_REJOIN', reconnectCode: reconnectInput }); setShowReconnectModal(false); }} className="w-full py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-[10px] tracking-widest active:scale-95 transition-transform">Link Channel</button>
+            <button onClick={() => { 
+                const token = localStorage.getItem(`ghost_token_${reconnectInput}`);
+                socket.emit({ type: 'CHAT_REJOIN', reconnectCode: reconnectInput, sessionToken: token }); 
+                setShowReconnectModal(false); 
+            }} className="w-full py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-[10px] tracking-widest active:scale-95 transition-transform">Link Channel</button>
           </div>
         </div>
       )}

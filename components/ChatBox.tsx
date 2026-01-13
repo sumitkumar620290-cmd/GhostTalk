@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Message, User, RoomType } from '../types';
 import { formatTime } from '../utils/helpers';
@@ -16,9 +15,14 @@ interface ChatBoxProps {
 const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage, onUserClick, roomType }) => {
   const [inputText, setInputText] = useState('');
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
-  const [swipedMessageId, setSwipedMessageId] = useState<string | null>(null);
-  const swipeStartRef = useRef<{ x: number; id: string } | null>(null);
   
+  // Swipe State
+  const [activeSwipeId, setActiveSwipeId] = useState<string | null>(null);
+  const [swipeOffset, setSwipeOffset] = useState(0);
+  const swipeStartRef = useRef<{ x: number; id: string } | null>(null);
+  const SWIPE_THRESHOLD = 60;
+  const MAX_SWIPE = 80;
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isAtBottom = useRef(true);
@@ -92,42 +96,46 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
       isAtBottom.current = true;
       setTimeout(() => {
         scrollToBottom('smooth');
-        // Task 2: Maintain focus on mobile
         inputRef.current?.focus();
       }, 50);
     }
   };
 
-  const startSwipe = (e: React.TouchEvent, id: string) => {
+  const startSwipe = (e: React.TouchEvent, id: string, senderId: string) => {
+    if (senderId === 'system') return;
     swipeStartRef.current = { x: e.touches[0].clientX, id };
+    setActiveSwipeId(id);
   };
 
   const moveSwipe = (e: React.TouchEvent) => {
     if (!swipeStartRef.current) return;
-    const deltaX = swipeStartRef.current.x - e.touches[0].clientX;
-    // Task 1: Swipe detection logic
-    if (Math.abs(deltaX) > 50) {
-      setSwipedMessageId(swipeStartRef.current.id);
+    const currentX = e.touches[0].clientX;
+    const deltaX = currentX - swipeStartRef.current.x;
+    
+    // Support right swipe to reply
+    if (deltaX > 0) {
+      setSwipeOffset(Math.min(deltaX, MAX_SWIPE));
     } else {
-      setSwipedMessageId(null);
+      setSwipeOffset(0);
     }
   };
 
   const endSwipe = () => {
-    if (swipedMessageId) {
-      const msg = visibleMessages.find(m => m.id === swipedMessageId);
+    if (activeSwipeId && swipeOffset >= SWIPE_THRESHOLD) {
+      const msg = visibleMessages.find(m => m.id === activeSwipeId);
       if (msg) {
         handleReplyClick(msg);
       }
     }
+    
+    // Smooth reset
     swipeStartRef.current = null;
-    setSwipedMessageId(null);
+    setSwipeOffset(0);
+    setTimeout(() => setActiveSwipeId(null), 300); // Wait for transition
   };
 
   const handleReplyClick = (msg: Message) => {
     setReplyingTo(msg);
-    setSwipedMessageId(null);
-    // Focus input when replying
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
@@ -139,15 +147,17 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
           100% { opacity: 0; transform: scale(1.05) translateY(-10px); filter: blur(4px); }
         }
         .message-disperse { animation: disperse 1s cubic-bezier(0.4, 0, 0.2, 1) forwards; pointer-events: none; }
-        .swipe-active { transform: translateX(-48px); }
         
-        /* Task 3: Subtle transitions */
         .message-entry {
           animation: message-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
         }
         @keyframes message-in {
           from { opacity: 0; transform: translateY(8px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+
+        .swipe-transition {
+          transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
         }
       `}</style>
       
@@ -182,13 +192,16 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
           const isCompact = prevMsg && prevMsg.senderId === msg.senderId && (msg.timestamp - prevMsg.timestamp < 60000);
           const age = now - msg.timestamp;
           const isExpiring = roomType === RoomType.COMMUNITY && age >= 299000;
-          const isSwiped = swipedMessageId === msg.id;
+          
+          const isBeingSwiped = activeSwipeId === msg.id;
+          const currentOffset = isBeingSwiped ? swipeOffset : 0;
+          const isOverThreshold = isBeingSwiped && swipeOffset >= SWIPE_THRESHOLD;
 
           return (
             <div 
               key={msg.id} 
               className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} ${isCompact ? 'mt-0.5' : 'mt-3'} group relative ${isExpiring ? 'message-disperse' : 'message-entry'} ${msg.senderId === 'system' ? 'opacity-80 transition-opacity duration-500' : ''}`}
-              onTouchStart={(e) => startSwipe(e, msg.id)}
+              onTouchStart={(e) => startSwipe(e, msg.id, msg.senderId)}
               onTouchMove={moveSwipe}
               onTouchEnd={endSwipe}
             >
@@ -203,7 +216,17 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
               )}
               
               <div className={`relative flex items-center w-full ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
-                <div className={`relative max-w-[92%] md:max-w-[80%] py-1.5 px-3.5 rounded-xl md:rounded-2xl text-[13px] md:text-sm leading-snug shadow-sm transition-all duration-200 ease-out ${isSwiped ? (isOwn ? '-translateX-10' : 'translateX-10') : ''} ${isOwn ? 'bg-blue-600 text-white rounded-tr-none' : (msg.senderId === 'system' ? 'bg-slate-800/50 text-slate-400 border border-white/5 rounded-lg' : 'bg-slate-900 text-slate-200 rounded-tl-none')}`}>
+                {/* Swipe Indicator */}
+                <div className={`absolute left-0 top-1/2 -translate-y-1/2 flex items-center transition-all duration-200 ${isBeingSwiped ? 'opacity-100' : 'opacity-0'}`} style={{ transform: `translateX(${Math.min(currentOffset / 2, 30)}px)` }}>
+                    <div className={`p-1.5 rounded-full transition-colors ${isOverThreshold ? 'bg-blue-600 text-white scale-110' : 'bg-slate-800 text-slate-500'}`}>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
+                    </div>
+                </div>
+
+                <div 
+                  className={`relative max-w-[92%] md:max-w-[80%] py-1.5 px-3.5 rounded-xl md:rounded-2xl text-[13px] md:text-sm leading-snug shadow-sm ${!swipeStartRef.current ? 'swipe-transition' : ''} ${isOwn ? 'bg-blue-600 text-white rounded-tr-none' : (msg.senderId === 'system' ? 'bg-slate-800/50 text-slate-400 border border-white/5 rounded-lg' : 'bg-slate-900 text-slate-200 rounded-tl-none')}`}
+                  style={{ transform: `translateX(${currentOffset}px)` }}
+                >
                   {msg.replyTo && (
                     <div className={`mb-1.5 p-2 rounded-lg text-[11px] border-l-2 ${isOwn ? 'bg-black/20 border-blue-400/50 text-blue-100' : 'bg-white/5 border-slate-700 text-slate-400'}`}>
                       <p className="font-black uppercase text-[8px] mb-0.5 opacity-70">{msg.replyTo.senderName}</p>
@@ -216,7 +239,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
                 {msg.senderId !== 'system' && (
                   <button 
                     onClick={() => handleReplyClick(msg)}
-                    className={`mx-2 p-1.5 rounded-full bg-slate-800 text-slate-400 opacity-0 group-hover:opacity-100 transition-all hover:text-blue-400 active:scale-90 ${isSwiped ? 'opacity-100 scale-110' : ''}`}
+                    className="hidden md:flex mx-2 p-1.5 rounded-full bg-slate-800 text-slate-400 opacity-0 group-hover:opacity-100 transition-all hover:text-blue-400 active:scale-90"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
                   </button>
@@ -263,7 +286,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
           <button 
             type="submit" 
             disabled={!inputText.trim()} 
-            onPointerDown={(e) => e.preventDefault()} // Task 2: Prevent blur on mobile send button tap
+            onPointerDown={(e) => e.preventDefault()}
             className="bg-blue-600 w-11 h-11 rounded-xl flex items-center justify-center shrink-0 shadow-lg shadow-blue-900/20 active:scale-95 transition-transform disabled:opacity-50 disabled:grayscale"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>

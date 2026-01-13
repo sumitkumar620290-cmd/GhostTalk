@@ -1,4 +1,3 @@
-
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
@@ -241,8 +240,17 @@ io.on('connection', (socket) => {
   });
 
   socket.on('CHAT_ACCEPT', (data) => {
+    // Generate session tokens for secure rejoin
+    const tokenA = Math.random().toString(36).substring(2) + Date.now().toString(36);
+    const tokenB = Math.random().toString(36).substring(2) + Date.now().toString(36);
+    
+    const participantTokens = {};
+    participantTokens[data.room.participants[0]] = tokenA;
+    participantTokens[data.room.participants[1]] = tokenB;
+
     const room = {
         ...data.room,
+        participantTokens,
         stageDecisions: { '5min': {}, '2min': {} }
     };
     privateRooms.set(room.id, room);
@@ -315,6 +323,7 @@ io.on('connection', (socket) => {
   socket.on('CHAT_REJOIN', (data) => {
     const currentUser = users.get(socket.id);
     if (!currentUser) return;
+    
     let foundRoom = null;
     for (let room of privateRooms.values()) {
       if (room.reconnectCode === data.reconnectCode) {
@@ -322,41 +331,63 @@ io.on('connection', (socket) => {
         break;
       }
     }
-    if (foundRoom) {
-      if (!foundRoom.participants.includes(currentUser.id)) foundRoom.participants.push(currentUser.id);
-      
-      // FIX REJOIN NOTIFICATION
-      if (foundRoom.rejoinStartedAt) {
-        foundRoom.rejoinStartedAt = null;
-        io.emit('MESSAGE', {
-          message: {
-            id: 'sys_rej_' + Date.now(),
-            senderId: 'system',
-            senderName: 'SYSTEM',
-            text: "Your friend rejoined the chat.",
-            timestamp: Date.now(),
-            roomId: foundRoom.id
-          }
-        });
-      }
 
-      const history = privateMessages.get(foundRoom.id) || [];
-      io.emit('CHAT_ACCEPT', { room: foundRoom, messages: history });
+    if (foundRoom) {
+      // Validate session token for same-device security
+      const tokenValues = Object.values(foundRoom.participantTokens || {});
+      const isValidToken = data.sessionToken && tokenValues.includes(data.sessionToken);
+
+      if (isValidToken) {
+        // Find original owner of this token and update their ID to current session ID
+        let originalId = null;
+        for (let [uid, token] of Object.entries(foundRoom.participantTokens)) {
+            if (token === data.sessionToken) {
+                originalId = uid;
+                break;
+            }
+        }
+
+        // Update participant list and token mapping
+        if (originalId && originalId !== currentUser.id) {
+            const index = foundRoom.participants.indexOf(originalId);
+            if (index > -1) foundRoom.participants[index] = currentUser.id;
+            
+            delete foundRoom.participantTokens[originalId];
+            foundRoom.participantTokens[currentUser.id] = data.sessionToken;
+        }
+
+        if (!foundRoom.participants.includes(currentUser.id)) foundRoom.participants.push(currentUser.id);
+        
+        if (foundRoom.rejoinStartedAt) {
+          foundRoom.rejoinStartedAt = null;
+          io.emit('MESSAGE', {
+            message: {
+              id: 'sys_rej_' + Date.now(),
+              senderId: 'system',
+              senderName: 'SYSTEM',
+              text: "Your ghost rejoined the chat.",
+              timestamp: Date.now(),
+              roomId: foundRoom.id
+            }
+          });
+        }
+
+        const history = privateMessages.get(foundRoom.id) || [];
+        io.emit('CHAT_ACCEPT', { room: foundRoom, messages: history });
+      } else {
+        socket.emit('ERROR', { message: 'Session not available.' });
+      }
     } else {
-      socket.emit('ERROR', { message: 'Invalid or Expired Secret Key' });
+      socket.emit('ERROR', { message: 'Session not available.' });
     }
   });
 
   socket.on('disconnect', () => {
-    // Rejoin Timer Notification (Fix 1)
     const user = users.get(socket.id);
     if (user) {
       for (let [roomId, room] of privateRooms.entries()) {
         if (room.participants.includes(user.id)) {
-          // FRESH rejoin timer immediately
           room.rejoinStartedAt = Date.now();
-          
-          // Broadcast room update so remaining user sees countdown
           io.emit('ROOM_UPDATE', { room });
           
           const otherId = room.participants.find(p => p !== user.id);
@@ -367,7 +398,7 @@ io.on('connection', (socket) => {
                 id: 'sys_disc_' + Date.now(),
                 senderId: 'system',
                 senderName: 'SYSTEM',
-                text: "Your friend disconnected. They have 15 minutes to rejoin this private chat.",
+                text: "Your ghost disconnected. Waiting 15 minutes.",
                 timestamp: Date.now(),
                 roomId: roomId
               }

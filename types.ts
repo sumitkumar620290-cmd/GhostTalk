@@ -1,4 +1,3 @@
-
 export interface User {
   id: string;
   username: string;
@@ -28,6 +27,7 @@ export interface PrivateRoom {
   expiresAt: number;
   extended?: boolean; // Track if the 30min extension has been used
   rejoinStartedAt?: number | null; // Track when the 15-min rejoin window begins
+  participantTokens?: { [userId: string]: string }; // Secure session tokens
 }
 
 export interface ChatRequest {
