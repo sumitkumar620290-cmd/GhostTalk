@@ -216,8 +216,8 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
               )}
               
               <div className={`relative flex items-center w-full ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
-                {/* Swipe Indicator */}
-                <div className={`absolute left-0 top-1/2 -translate-y-1/2 flex items-center transition-all duration-200 ${isBeingSwiped ? 'opacity-100' : 'opacity-0'}`} style={{ transform: `translateX(${Math.min(currentOffset / 2, 30)}px)` }}>
+                {/* Swipe Indicator - Fixed vertical centering */}
+                <div className={`absolute left-0 top-1/2 flex items-center transition-all duration-200 ${isBeingSwiped ? 'opacity-100' : 'opacity-0'}`} style={{ transform: `translateY(-50%) translateX(${Math.min(currentOffset / 2, 30)}px)` }}>
                     <div className={`p-1.5 rounded-full transition-colors ${isOverThreshold ? 'bg-blue-600 text-white scale-110' : 'bg-slate-800 text-slate-500'}`}>
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
                     </div>
