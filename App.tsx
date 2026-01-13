@@ -34,6 +34,10 @@ interface ErrorPayload {
   message: string;
 }
 
+interface FeedbackEntry {
+  text: string;
+}
+
 const App: React.FC = () => {
   const BMC_LINK = "https://buymeacoffee.com/ghosttalk";
   
@@ -41,11 +45,18 @@ const App: React.FC = () => {
   const [showSidebar, setShowSidebar] = useState(false);
   const [showNotificationMenu, setShowNotificationMenu] = useState(false);
   const [showPeersMenu, setShowPeersMenu] = useState(false);
+  const [showInfoModal, setShowInfoModal] = useState(false);
   const [currentTime, setCurrentTime] = useState(Date.now());
   const [showExtendPopup, setShowExtendPopup] = useState<{ roomId: string, stage: '5min' | '2min' } | null>(null);
   const [showContactNotice, setShowContactNotice] = useState<string | null>(null);
   const [sessionTopic, setSessionTopic] = useState<string>('');
   const [currentStarterPrompt, setCurrentStarterPrompt] = useState<string>(() => getWelcomePrompt());
+
+  // Feedback State
+  const [feedbackText, setFeedbackText] = useState('');
+  const [allFeedbacks, setAllFeedbacks] = useState<FeedbackEntry[]>([]);
+  const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+  const [feedbackError, setFeedbackError] = useState('');
   
   // Track room IDs and stages that already showed extension prompt
   const promptedStages = useRef<Map<string, Set<string>>>(new Map());
@@ -160,14 +171,15 @@ const App: React.FC = () => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }, [commTimerEnd, currentTime]);
 
-  const handleSendMessage = (text: string) => {
+  const handleSendMessage = (text: string, replyTo?: Message['replyTo']) => {
     const msg: Message = {
       id: generateId(),
       senderId: currentUser.id,
       senderName: currentUser.username,
       text,
       timestamp: Date.now(),
-      roomId: activeRoomId
+      roomId: activeRoomId,
+      replyTo
     };
     socket.emit({ type: 'MESSAGE', message: msg });
   };
@@ -218,6 +230,34 @@ const App: React.FC = () => {
       userId: currentUser.id 
     });
     setShowExtendPopup(null);
+  };
+
+  const handleFeedbackSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const wordCount = feedbackText.trim().split(/\s+/).filter(word => word.length > 0).length;
+    if (wordCount < 15) {
+      setFeedbackError('Please write at least 15 words so we can understand your feedback.');
+      return;
+    }
+    
+    setFeedbackError('');
+    setFeedbackStatus('submitting');
+    try {
+      const response = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedback: feedbackText }),
+      });
+      if (response.ok) {
+        setFeedbackStatus('success');
+        setFeedbackText('');
+        setTimeout(() => setFeedbackStatus('idle'), 3000);
+      } else {
+        setFeedbackStatus('error');
+      }
+    } catch (err) {
+      setFeedbackStatus('error');
+    }
   };
 
   useEffect(() => {
@@ -331,6 +371,7 @@ const App: React.FC = () => {
       if (data.communityMessages) setMessages(data.communityMessages);
       if (data.communityTimerEnd) setCommTimerEnd(data.communityTimerEnd);
       if (data.currentTopic) setSessionTopic(data.currentTopic);
+      if (data.feedbacks) setAllFeedbacks(data.feedbacks);
       if (data.onlineUsers) {
         setOnlineUsers(prev => {
           const next = new Map(prev);
@@ -342,6 +383,10 @@ const App: React.FC = () => {
           return next;
         });
       }
+    });
+
+    const unsubFeedback = socket.on<FeedbackEntry>('NEW_FEEDBACK', (data) => {
+      setAllFeedbacks(prev => [...prev, data].slice(-50));
     });
 
     const unsubError = socket.on<ErrorPayload>('ERROR', (data) => {
@@ -357,7 +402,7 @@ const App: React.FC = () => {
     });
 
     return () => {
-      unsubHB(); unsubMsg(); unsubReq(); unsubAccept(); unsubUpdate(); unsubExtended(); unsubClosed(); unsubInit(); unsubError(); unsubResetComm();
+      unsubHB(); unsubMsg(); unsubReq(); unsubAccept(); unsubUpdate(); unsubExtended(); unsubClosed(); unsubInit(); unsubError(); unsubResetComm(); unsubFeedback();
     };
   }, [socket, activeRoomId]);
 
@@ -496,6 +541,10 @@ const App: React.FC = () => {
           </button>
 
           <div className="flex items-center space-x-2">
+            <button onClick={() => setShowInfoModal(true)} className="p-2 bg-slate-800 rounded-lg border border-white/5 transition-all hover:bg-slate-700 text-slate-400">
+              <span className="text-[10px] font-bold">ⓘ</span>
+            </button>
+
             <div className="relative">
               <button onClick={() => { setShowNotificationMenu(!showNotificationMenu); setShowPeersMenu(false); }} className={`p-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-all border border-white/5 ${activeIncomingRequest ? 'animate-bell-shake text-blue-400' : 'text-slate-400'}`}>
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
@@ -660,6 +709,113 @@ const App: React.FC = () => {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Info Modal */}
+      {showInfoModal && (
+        <div className="fixed inset-0 z-[1000] bg-slate-950/95 backdrop-blur-xl flex items-center justify-center p-4 md:p-6" onClick={() => setShowInfoModal(false)}>
+          <div className="bg-slate-900 border border-white/5 rounded-[2rem] w-full max-w-2xl h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-white/5 flex items-center justify-between shrink-0">
+              <h3 className="text-lg font-black text-white uppercase tracking-tight">Information Center</h3>
+              <button onClick={() => setShowInfoModal(false)} className="text-slate-500 hover:text-white transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-8">
+              {/* HOW IT WORKS */}
+              <section>
+                <h4 className="text-[10px] font-black uppercase text-blue-500 tracking-widest mb-4">How Ghost Talk Works</h4>
+                <div className="space-y-4 text-slate-400 text-[13px] leading-relaxed font-medium">
+                  <p>• No login. No account. No identity.<br/>• You enter with a random presence.</p>
+                  
+                  <div>
+                    <h5 className="text-[11px] font-black text-white uppercase mb-1">Community Chat</h5>
+                    <p>• Talk freely with others.<br/>• Conversations are temporary.<br/>• Nothing is saved.</p>
+                  </div>
+
+                  <div>
+                    <h5 className="text-[11px] font-black text-white uppercase mb-1">Private Chat</h5>
+                    <p>• Start a private chat only if both users accept.<br/>• A private chat begins with a 30-minute timer.<br/>• If someone leaves accidentally, a 15-minute rejoin timer starts.<br/>• If they rejoin, the chat continues.<br/>• If they don’t, the private chat ends.<br/>• Clicking Exit ends the private chat for both users.<br/>• When the private timer ends, the chat closes permanently.</p>
+                  </div>
+
+                  <div>
+                    <h5 className="text-[11px] font-black text-white uppercase mb-1">Privacy</h5>
+                    <p>• No history<br/>• No memory<br/>• No tracking</p>
+                  </div>
+                </div>
+              </section>
+
+              {/* FAQs */}
+              <section>
+                <h4 className="text-[10px] font-black uppercase text-blue-500 tracking-widest mb-4">FAQ</h4>
+                <div className="space-y-4">
+                  {[
+                    { q: "Is Ghost Talk anonymous?", a: "Yes. No login, no identity, no memory." },
+                    { q: "Are chats saved?", a: "No. Everything disappears." },
+                    { q: "Can anyone track me?", a: "No user tracking is done." },
+                    { q: "What happens when time ends?", a: "The chat closes and is deleted." },
+                    { q: "Can I recover a chat?", a: "No. Lost chats cannot be restored." }
+                  ].map((item, i) => (
+                    <div key={i} className="bg-slate-800/30 p-4 rounded-xl border border-white/5">
+                      <p className="text-[11px] font-black text-white uppercase mb-1">Q: {item.q}</p>
+                      <p className="text-[12px] font-medium text-slate-400">A: {item.a}</p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              {/* FEEDBACK */}
+              <section className="bg-blue-600/5 p-6 rounded-2xl border border-blue-500/10">
+                <h4 className="text-[10px] font-black uppercase text-blue-400 tracking-widest mb-2">Feedback</h4>
+                <p className="text-[12px] font-bold text-white mb-1">Share your thoughts anonymously.</p>
+                <p className="text-[11px] font-medium text-slate-400 mb-4 leading-relaxed">Please write at least 15 words.<br/>No personal information is collected or stored.</p>
+                
+                <form onSubmit={handleFeedbackSubmit} className="space-y-3 mb-6">
+                  <textarea 
+                    value={feedbackText}
+                    onChange={(e) => setFeedbackText(e.target.value)}
+                    placeholder="Your anonymous feedback..."
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl p-4 text-[13px] text-slate-100 placeholder-slate-700 min-h-[120px] focus:outline-none focus:ring-1 focus:ring-blue-500/50 resize-none"
+                  />
+                  {feedbackError && <p className="text-[10px] font-black text-red-500 uppercase">{feedbackError}</p>}
+                  
+                  {feedbackStatus === 'success' ? (
+                    <div className="py-3 bg-green-500/10 border border-green-500/20 text-green-400 text-center text-[10px] font-black uppercase rounded-xl">Feedback Received. Thank you.</div>
+                  ) : (
+                    <button 
+                      type="submit" 
+                      disabled={feedbackStatus === 'submitting'}
+                      className="w-full py-3.5 bg-blue-600 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-xl active:scale-95 disabled:opacity-50 transition-all"
+                    >
+                      {feedbackStatus === 'submitting' ? 'Submitting...' : 'Submit Feedback'}
+                    </button>
+                  )}
+                  {feedbackStatus === 'error' && <p className="text-[10px] font-black text-red-500 uppercase text-center mt-2">Failed to send. Try again later.</p>}
+                </form>
+
+                {/* FEEDBACK DISPLAY LIST */}
+                <div className="space-y-3 mt-8">
+                   <h5 className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-4">Latest Feedback</h5>
+                   {allFeedbacks.length === 0 ? (
+                     <p className="text-[11px] text-slate-600 italic text-center py-4">No feedback yet. Be the first ghost to share!</p>
+                   ) : (
+                     allFeedbacks.map((f, i) => (
+                       <div key={i} className="bg-slate-950/40 border border-white/5 p-4 rounded-xl">
+                         <p className="text-[10px] font-black text-blue-500 uppercase mb-1">👻 Ghost</p>
+                         <p className="text-[12px] text-slate-300 leading-relaxed">{f.text}</p>
+                       </div>
+                     )).reverse()
+                   )}
+                </div>
+              </section>
+            </div>
+            
+            <div className="p-4 border-t border-white/5 shrink-0 flex justify-center">
+              <button onClick={() => setShowInfoModal(false)} className="px-8 py-3 bg-slate-800 text-slate-300 font-black rounded-xl text-[10px] uppercase tracking-widest">Close Info</button>
+            </div>
           </div>
         </div>
       )}

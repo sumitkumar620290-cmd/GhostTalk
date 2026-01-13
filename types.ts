@@ -14,6 +14,10 @@ export interface Message {
   text: string;
   timestamp: number;
   roomId: string;
+  replyTo?: {
+    text: string;
+    senderName: string;
+  };
 }
 
 export interface PrivateRoom {

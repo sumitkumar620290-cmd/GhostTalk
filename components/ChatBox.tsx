@@ -6,7 +6,7 @@ import { formatTime } from '../utils/helpers';
 interface ChatBoxProps {
   messages: Message[];
   currentUser: User;
-  onSendMessage: (text: string) => void;
+  onSendMessage: (text: string, replyTo?: Message['replyTo']) => void;
   title: string;
   roomType: RoomType;
   onUserClick?: (userId: string, username: string) => void;
@@ -15,6 +15,10 @@ interface ChatBoxProps {
 
 const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage, onUserClick, roomType }) => {
   const [inputText, setInputText] = useState('');
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [swipedMessageId, setSwipedMessageId] = useState<string | null>(null);
+  const swipeStartRef = useRef<{ x: number; id: string } | null>(null);
+  
   const scrollRef = useRef<HTMLDivElement>(null);
   const isAtBottom = useRef(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -26,7 +30,6 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
     return () => clearInterval(ticker);
   }, []);
 
-  // Task 4: Private chat messages do NOT disappear every 5 minutes.
   const visibleMessages = messages.filter(m => roomType === RoomType.PRIVATE ? true : now - m.timestamp < 300000);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -43,7 +46,6 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
   const handleScroll = () => {
     if (scrollRef.current) {
       const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-      // If within 100px of bottom, consider "at bottom"
       const nearBottom = scrollHeight - scrollTop - clientHeight < 100;
       isAtBottom.current = nearBottom;
       
@@ -64,7 +66,6 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
         scrollToBottom('smooth');
         lastSeenMessageId.current = currentLastMessageId;
       } else {
-        // Only show button if a NEW message has arrived since we were last at the bottom
         if (currentLastMessageId !== lastSeenMessageId.current) {
           setShowScrollButton(true);
         }
@@ -84,11 +85,35 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
     if (e) e.preventDefault();
     const text = inputText.trim();
     if (text) {
-      onSendMessage(text);
+      onSendMessage(text, replyingTo ? { text: replyingTo.text, senderName: replyingTo.senderName } : undefined);
       setInputText('');
+      setReplyingTo(null);
       isAtBottom.current = true;
       setTimeout(() => scrollToBottom('smooth'), 50);
     }
+  };
+
+  const startSwipe = (e: React.TouchEvent, id: string) => {
+    swipeStartRef.current = { x: e.touches[0].clientX, id };
+  };
+
+  const moveSwipe = (e: React.TouchEvent) => {
+    if (!swipeStartRef.current) return;
+    const deltaX = swipeStartRef.current.x - e.touches[0].clientX;
+    if (deltaX > 40) {
+      setSwipedMessageId(swipeStartRef.current.id);
+    } else {
+      setSwipedMessageId(null);
+    }
+  };
+
+  const endSwipe = () => {
+    swipeStartRef.current = null;
+  };
+
+  const handleReplyClick = (msg: Message) => {
+    setReplyingTo(msg);
+    setSwipedMessageId(null);
   };
 
   return (
@@ -99,9 +124,9 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
           100% { opacity: 0; transform: scale(1.05) translateY(-10px); filter: blur(4px); }
         }
         .message-disperse { animation: disperse 1s cubic-bezier(0.4, 0, 0.2, 1) forwards; pointer-events: none; }
+        .swipe-active { transform: translateX(-48px); }
       `}</style>
       
-      {/* Watermark Fix (Branding + Ghost Logo/Emoji) - Fix 3 */}
       <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center opacity-[0.12] select-none z-0">
         <div className="text-5xl md:text-6xl mb-4 grayscale brightness-200">👻</div>
         <h2 className="text-3xl md:text-4xl font-black uppercase tracking-tighter leading-none text-slate-100">Ghost Talk</h2>
@@ -133,11 +158,15 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
           const isCompact = prevMsg && prevMsg.senderId === msg.senderId && (msg.timestamp - prevMsg.timestamp < 60000);
           const age = now - msg.timestamp;
           const isExpiring = roomType === RoomType.COMMUNITY && age >= 299000;
+          const isSwiped = swipedMessageId === msg.id;
 
           return (
             <div 
               key={msg.id} 
-              className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} ${isCompact ? 'mt-0.5' : 'mt-3'} group ${isExpiring ? 'message-disperse' : ''}`}
+              className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} ${isCompact ? 'mt-0.5' : 'mt-3'} group relative ${isExpiring ? 'message-disperse' : ''}`}
+              onTouchStart={(e) => startSwipe(e, msg.id)}
+              onTouchMove={moveSwipe}
+              onTouchEnd={endSwipe}
             >
               {!isCompact && (
                 <div className={`flex items-center space-x-1.5 mb-0.5 px-1 ${isOwn ? 'flex-row-reverse space-x-reverse' : ''}`}>
@@ -149,8 +178,23 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
                 </div>
               )}
               
-              <div className={`relative max-w-[92%] md:max-w-[80%] py-1.5 px-3.5 rounded-xl md:rounded-2xl text-[13px] md:text-sm leading-snug shadow-sm ${isOwn ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-slate-900 text-slate-200 rounded-tl-none'}`}>
-                <div className="whitespace-pre-wrap break-words font-medium">{msg.text}</div>
+              <div className={`relative flex items-center w-full ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
+                <div className={`relative max-w-[92%] md:max-w-[80%] py-1.5 px-3.5 rounded-xl md:rounded-2xl text-[13px] md:text-sm leading-snug shadow-sm transition-transform duration-200 ${isSwiped ? (isOwn ? '-translateX-12' : 'translateX-12') : ''} ${isOwn ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-slate-900 text-slate-200 rounded-tl-none'}`}>
+                  {msg.replyTo && (
+                    <div className={`mb-1.5 p-2 rounded-lg text-[11px] border-l-2 ${isOwn ? 'bg-black/20 border-blue-400/50 text-blue-100' : 'bg-white/5 border-slate-700 text-slate-400'}`}>
+                      <p className="font-black uppercase text-[8px] mb-0.5 opacity-70">{msg.replyTo.senderName}</p>
+                      <p className="truncate line-clamp-1 italic">{msg.replyTo.text}</p>
+                    </div>
+                  )}
+                  <div className="whitespace-pre-wrap break-words font-medium">{msg.text}</div>
+                </div>
+
+                <button 
+                  onClick={() => handleReplyClick(msg)}
+                  className={`mx-2 p-1.5 rounded-full bg-slate-800 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-blue-400 active:scale-90 ${isSwiped ? 'opacity-100' : ''}`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
+                </button>
               </div>
             </div>
           );
@@ -168,6 +212,17 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
       )}
 
       <div className="p-2 md:p-3 bg-slate-900/95 backdrop-blur-3xl border-t border-white/5 z-20 shrink-0">
+        {replyingTo && (
+          <div className="max-w-3xl mx-auto mb-2 flex items-center justify-between bg-slate-950/50 p-2 rounded-xl border border-white/5 animate-in slide-in-from-bottom-1">
+            <div className="flex-1 min-w-0 pr-4">
+              <p className="text-[10px] font-black uppercase text-blue-500 mb-0.5">Replying to {replyingTo.senderName}</p>
+              <p className="text-[11px] text-slate-500 truncate italic">{replyingTo.text}</p>
+            </div>
+            <button onClick={() => setReplyingTo(null)} className="text-slate-600 hover:text-white transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="max-w-3xl mx-auto flex items-center space-x-2">
           <textarea
             value={inputText}

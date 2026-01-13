@@ -10,6 +10,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+// Add JSON parser for feedback endpoint
+app.use(express.json());
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -31,6 +34,7 @@ let users = new Map();
 let communityMessages = []; 
 let privateRooms = new Map(); 
 let privateMessages = new Map(); // roomId -> Array<Message>
+let feedbacks = []; // In-memory storage for anonymous feedback
 let communityTimerEnd = getNextBoundary(30);
 let siteTimerEnd = getNextBoundary(120);
 let currentTopic = "What is a thought you've never shared out loud?";
@@ -66,6 +70,7 @@ const resetSite = () => {
   communityMessages = [];
   privateRooms.clear();
   privateMessages.clear();
+  feedbacks = [];
   communityTimerEnd = getNextBoundary(30);
   siteTimerEnd = getNextBoundary(120);
   calculateQuietMoment(communityTimerEnd);
@@ -116,6 +121,29 @@ setInterval(() => {
   }
 }, 1000);
 
+// ANONYMOUS FEEDBACK ENDPOINT
+app.post('/api/feedback', (req, res) => {
+  const { feedback } = req.body;
+  if (!feedback) {
+    return res.status(400).json({ error: 'No feedback provided' });
+  }
+
+  const wordCount = feedback.trim().split(/\s+/).filter(word => word.length > 0).length;
+  if (wordCount < 15) {
+    return res.status(400).json({ error: 'Feedback too short' });
+  }
+
+  // --- CONFIGURATION: IN-MEMORY FEEDBACK ---
+  const feedbackEntry = { text: feedback };
+  feedbacks.push(feedbackEntry);
+  if (feedbacks.length > 50) feedbacks.shift(); // Keep only latest 50
+  
+  // Broadcast immediately to all connected clients
+  io.emit('NEW_FEEDBACK', feedbackEntry);
+  
+  res.json({ success: true });
+});
+
 io.on('connection', (socket) => {
   socket.hasSeenSoftFirst = false;
   socket.borderlineCount = 0;
@@ -125,6 +153,7 @@ io.on('connection', (socket) => {
     communityMessages,
     communityTimerEnd,
     siteTimerEnd,
+    feedbacks,
     onlineUsers: Array.from(users.values()),
     currentTopic,
     quietMoment: { start: quietStart, end: quietEnd }
