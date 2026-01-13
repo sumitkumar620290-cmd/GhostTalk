@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { User, Message, PrivateRoom, ChatRequest, RoomType } from './types';
 import { generateId, generateUsername, generateReconnectCode, getWelcomePrompt } from './utils/helpers';
 import SocketService from './services/socketService';
@@ -49,7 +49,14 @@ const App: React.FC = () => {
   const [showExtendPopup, setShowExtendPopup] = useState<{ roomId: string, stage: '5min' | '2min' } | null>(null);
   const [showContactNotice, setShowContactNotice] = useState<string | null>(null);
   const [sessionTopic, setSessionTopic] = useState<string>('');
+  const [isInputDisabled, setIsInputDisabled] = useState(false);
   
+  // Anti-Spam State
+  const spamState = useRef({
+    history: [] as { time: number, text: string }[],
+    hasWarned: false
+  });
+
   // Feedback State
   const [feedbackText, setFeedbackText] = useState('');
   const [allFeedbacks, setAllFeedbacks] = useState<FeedbackEntry[]>([]);
@@ -81,6 +88,7 @@ const App: React.FC = () => {
   }, [isOpenToPrivate]);
 
   const [commTimerEnd, setCommTimerEnd] = useState<number>(Date.now() + 1800000); 
+  const [siteTimerEnd, setSiteTimerEnd] = useState<number>(Date.now() + 7200000);
   const [messages, setMessages] = useState<Message[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<string>('community');
   const [activeRoomType, setActiveRoomType] = useState<RoomType>(RoomType.COMMUNITY);
@@ -103,10 +111,30 @@ const App: React.FC = () => {
     return () => clearInterval(hb);
   }, [socket, currentUser, isOpenToPrivate]);
 
+  // Task 2: Absolute Timer Comparison Logic
+  // Fix: Added useCallback to the import list from React.
+  const checkTimers = useCallback(() => {
+    const now = Date.now();
+    
+    // Check Community Expiry
+    if (now >= commTimerEnd) {
+      setMessages(prev => prev.filter(m => m.roomId !== 'community'));
+      // Brief lockout to allow state to settle
+      setIsInputDisabled(true);
+      setTimeout(() => setIsInputDisabled(false), 2000);
+    }
+
+    // Check Site/Global Expiry
+    if (now >= siteTimerEnd) {
+      window.location.reload(); // Force full clean reset for total site expiry
+    }
+  }, [commTimerEnd, siteTimerEnd]);
+
   useEffect(() => {
     const tick = setInterval(() => {
       const now = Date.now();
       setCurrentTime(now);
+      checkTimers();
 
       setOnlineUsers(prev => {
         const next = new Map<string, User>(prev);
@@ -156,8 +184,17 @@ const App: React.FC = () => {
         }
       });
     }, 1000);
-    return () => clearInterval(tick);
-  }, [activeRoomId, privateRooms]);
+
+    // Listeners for mobile browser throttling
+    window.addEventListener('focus', checkTimers);
+    document.addEventListener('visibilitychange', checkTimers);
+
+    return () => {
+      clearInterval(tick);
+      window.removeEventListener('focus', checkTimers);
+      document.removeEventListener('visibilitychange', checkTimers);
+    };
+  }, [activeRoomId, privateRooms, checkTimers]);
 
   const timeLeftGlobal = useMemo(() => {
     const diff = Math.max(0, commTimerEnd - currentTime);
@@ -167,16 +204,55 @@ const App: React.FC = () => {
   }, [commTimerEnd, currentTime]);
 
   const handleSendMessage = (text: string, replyTo?: Message['replyTo']) => {
+    if (isInputDisabled) return;
+    
+    const now = Date.now();
     const msg: Message = {
       id: generateId(),
       senderId: currentUser.id,
       senderName: currentUser.username,
       text,
-      timestamp: Date.now(),
+      timestamp: now,
       roomId: activeRoomId,
       replyTo
     };
-    socket.emit({ type: 'MESSAGE', message: msg });
+
+    // Task 3: Anti-Spam Protection
+    const recentHistory = spamState.current.history.filter(h => now - h.time < 60000);
+    const lastSecCount = recentHistory.filter(h => now - h.time < 1000).length;
+    const sameContentCount = recentHistory.filter(h => h.text === text).length;
+
+    let isSpam = false;
+    if (lastSecCount >= 10 || sameContentCount >= 10) {
+      isSpam = true;
+    }
+
+    // Always show locally for the sender
+    setMessages(prev => [...prev, msg].slice(-300));
+
+    if (isSpam) {
+      // Layer 3: Gentle system warning (once)
+      if (!spamState.current.hasWarned && activeRoomId === 'community') {
+        setTimeout(() => {
+          const sysMsg: Message = {
+            id: 'sys_spam_' + generateId(),
+            senderId: 'system',
+            senderName: 'SYSTEM',
+            text: "Let’s keep Ghost Talk readable for everyone.",
+            timestamp: Date.now(),
+            roomId: activeRoomId
+          };
+          setMessages(prev => [...prev, sysMsg]);
+        }, 500);
+        spamState.current.hasWarned = true;
+      }
+      // Silently drop - don't emit
+    } else {
+      socket.emit({ type: 'MESSAGE', message: msg });
+    }
+
+    // Update spam history
+    spamState.current.history = [...recentHistory, { time: now, text }];
   };
 
   const sendRequest = (targetUser: User) => {
@@ -267,9 +343,13 @@ const App: React.FC = () => {
         return next;
       });
       if (data.communityTimerEnd) setCommTimerEnd(data.communityTimerEnd);
+      if (data.siteTimerEnd) setSiteTimerEnd(data.siteTimerEnd);
     });
 
     const unsubMsg = socket.on<MessagePayload>('MESSAGE', (data) => {
+      // Don't add if it's our own (already added locally for latency/anti-spam UX)
+      if (data.message.senderId === currentUserIdRef.current) return;
+      
       setMessages(prev => {
         if (data.message && prev.find(m => m.id === data.message.id)) return prev;
         return [...prev, data.message].slice(-300);
@@ -372,13 +452,18 @@ const App: React.FC = () => {
 
     const unsubResetComm = socket.on<any>('RESET_COMMUNITY', (data) => {
       if (data.topic) setSessionTopic(data.topic);
-      if (data.nextReset) setCommTimerEnd(data.nextReset);
+      if (data.nextReset) {
+        setCommTimerEnd(data.nextReset);
+        // Reset anti-spam warn state for new session
+        spamState.current.hasWarned = false;
+      }
       setMessages(prev => prev.filter(m => m.roomId !== 'community'));
     });
 
     const unsubInit = socket.on<any>('INIT_STATE', (data) => {
       if (data.communityMessages) setMessages(data.communityMessages);
       if (data.communityTimerEnd) setCommTimerEnd(data.communityTimerEnd);
+      if (data.siteTimerEnd) setSiteTimerEnd(data.siteTimerEnd);
       if (data.currentTopic) setSessionTopic(data.currentTopic);
       if (data.feedbacks) setAllFeedbacks(data.feedbacks);
       if (data.onlineUsers) {
@@ -457,7 +542,7 @@ const App: React.FC = () => {
       </div>
       
       <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-6 min-h-0 overscroll-contain">
-        {activePrivateRoom && (
+        {activeRoomType === RoomType.PRIVATE && activePrivateRoom && (
           <>
             <div>
               <h4 className="text-[9px] font-black uppercase text-indigo-500 tracking-widest mb-3">Secret Restore Key</h4>
@@ -484,19 +569,21 @@ const App: React.FC = () => {
           </>
         )}
 
-        <div>
-          <h4 className="text-[9px] font-black uppercase text-slate-500 tracking-widest mb-2">GLOBAL / COMMUNITY GUIDELINES</h4>
-          <ul className="text-[10px] text-slate-400 space-y-2 font-medium">
-            <li>• No login. Fully anonymous.</li>
-            <li>• Be respectful to other ghosts.</li>
-            <li>• No spamming or flooding messages.</li>
-            <li>• No harassment, threats, or intimidation.</li>
-            <li>• No illegal or harmful activities of any kind.</li>
-            <li>• Do not share personal or identifiable information publicly.</li>
-            <li>• Conversations must remain consensual and lawful.</li>
-            <li>• Community safety comes first.</li>
-          </ul>
-        </div>
+        {activeRoomType === RoomType.COMMUNITY && (
+          <div>
+            <h4 className="text-[9px] font-black uppercase text-slate-500 tracking-widest mb-2">GLOBAL / COMMUNITY GUIDELINES</h4>
+            <ul className="text-[10px] text-slate-400 space-y-2 font-medium">
+              <li>• No login. Fully anonymous.</li>
+              <li>• Be respectful to other ghosts.</li>
+              <li>• No spamming or flooding messages.</li>
+              <li>• No harassment, threats, or intimidation.</li>
+              <li>• No illegal or harmful activities of any kind.</li>
+              <li>• Do not share personal or identifiable information publicly.</li>
+              <li>• Conversations must remain consensual and lawful.</li>
+              <li>• Community safety comes first.</li>
+            </ul>
+          </div>
+        )}
 
         <div className="bg-red-950/20 border border-red-500/20 p-3 rounded-lg mb-4">
           <h4 className="text-[9px] font-black uppercase text-red-500 tracking-widest mb-2">18+ NOTICE</h4>
@@ -509,11 +596,14 @@ const App: React.FC = () => {
       </div>
 
       <div className="shrink-0 pt-4 border-t border-white/5 space-y-2 mt-2 pb-2">
+        <button onClick={() => { setShowInfoModal(true); setShowSidebar(false); }} className="w-full py-2.5 bg-slate-800 rounded-lg text-[9px] font-black uppercase border border-white/5 flex items-center justify-center space-x-1.5 hover:bg-slate-700 transition-all active:scale-95 text-slate-300">
+          <span className="text-[10px] font-bold">ⓘ</span><span>Information Center</span>
+        </button>
         <button onClick={() => { setShowReconnectModal(true); setShowSidebar(false); }} className="w-full py-2.5 bg-slate-800 rounded-lg text-[9px] font-black uppercase border border-white/5 flex items-center justify-center space-x-1.5 hover:bg-slate-700 transition-all active:scale-95 text-slate-300">
           <span>🔑</span><span>Restore Session</span>
         </button>
         <a href={BMC_LINK} target="_blank" rel="noopener noreferrer" className="w-full py-3 bg-blue-600/10 text-blue-400 rounded-lg text-[9px] font-black uppercase text-center border border-blue-600/20 hover:bg-blue-600/20 transition-all flex items-center justify-center space-x-1.5 active:scale-95">
-          <span>☕</span><span>Support Developer</span>
+          <span>☕</span><span>Buy Me a Coffee</span>
         </a>
       </div>
     </div>
@@ -541,10 +631,6 @@ const App: React.FC = () => {
           </button>
 
           <div className="flex items-center space-x-2">
-            <button onClick={() => setShowInfoModal(true)} className="p-2 bg-slate-800 rounded-lg border border-white/5 transition-all hover:bg-slate-700 text-slate-400 active:scale-90">
-              <span className="text-[10px] font-bold">ⓘ</span>
-            </button>
-
             <div className="relative">
               <button onClick={() => { setShowNotificationMenu(!showNotificationMenu); setShowPeersMenu(false); }} className={`p-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-all border border-white/5 active:scale-90 ${activeIncomingRequest ? 'animate-bell-shake text-blue-400' : 'text-slate-400'}`}>
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>

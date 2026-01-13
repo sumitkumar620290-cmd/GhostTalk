@@ -143,10 +143,14 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
     <div className="flex-1 flex flex-col min-h-0 bg-slate-950 relative overflow-hidden">
       <style>{`
         @keyframes disperse {
-          0% { opacity: 1; transform: scale(1) filter: blur(0px); }
-          100% { opacity: 0; transform: scale(1.05) translateY(-10px); filter: blur(4px); }
+          0% { opacity: 1; transform: scale(1); filter: blur(0px); }
+          100% { opacity: 0; transform: scale(1.02) translateY(-4px); filter: blur(8px); }
         }
-        .message-disperse { animation: disperse 1s cubic-bezier(0.4, 0, 0.2, 1) forwards; pointer-events: none; }
+        .message-disperse { 
+          animation: disperse 1.5s cubic-bezier(0.4, 0, 0.2, 1) forwards; 
+          pointer-events: none; 
+          will-change: transform, opacity, filter;
+        }
         
         .message-entry {
           animation: message-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
@@ -191,7 +195,8 @@ const ChatBox: React.FC<ChatBoxProps> = ({ messages, currentUser, onSendMessage,
           const prevMsg = visibleMessages[idx - 1];
           const isCompact = prevMsg && prevMsg.senderId === msg.senderId && (msg.timestamp - prevMsg.timestamp < 60000);
           const age = now - msg.timestamp;
-          const isExpiring = roomType === RoomType.COMMUNITY && age >= 299000;
+          // Task 1: Start dissolve effect slightly before actual removal (300s limit)
+          const isExpiring = roomType === RoomType.COMMUNITY && age >= 298500;
           
           const isBeingSwiped = activeSwipeId === msg.id;
           const currentOffset = isBeingSwiped ? swipeOffset : 0;
